@@ -119,9 +119,7 @@ class WaveformConfig:
     """
     是否在每个谐波的相位里显式加入 (2*gamma + 2*alpha)。
     """
-    # TODO：未来可以增加：
-    #   - use_spin_flux: 是否使用自旋修正的 flux
-    #   - use_full_pn_flux: 是否启用 Barack & Cutler 完整 PN 系数
+    flux_model: str = "BC04"
 @dataclass
 class LISAConfig:
     """
