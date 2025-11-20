@@ -20,7 +20,7 @@ import numpy as np
 
 from ..parameters import EMRIParameters, WaveformConfig
 from ..orbits.nk_geodesic_orbit import NKOrbitTrajectory
-
+from ..parameters import NKParameters
 
 @dataclass
 class NKPolarizations:
@@ -74,82 +74,94 @@ def _orthonormal_basis_from_n(n: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np
 
 def generate_nk_polarizations(
     traj: NKOrbitTrajectory,
-    params: EMRIParameters,
+    params: NKParameters,
     config: WaveformConfig,
     D_L: float = 1.0,
     n_obs: Optional[np.ndarray] = None,
 ) -> NKPolarizations:
     """
-    根据 NK 轨道（近似 Boyer-Lindquist 坐标）生成四极矩近似的 NK 波形 (h_+, h_×)。
+    生成 NK 波形 (h_+, h_×)。
+
+    - multipole_order = 'quad' 时：只计算质量四极矩
+    - multipole_order = 'quad+oct' 时：额外加入质量八极 + 电流四极
+      （具体公式见 Barack & Cutler 2004, Appendix; Babak et al. 2007）
     """
-    t = traj.t
-    dt = config.dt
+    if params.multipole_order == "quad":
+        t = traj.t
+        dt = config.dt
 
-    # 1. 粒子轨道的笛卡尔坐标 (x, y, z)
-    r = traj.r_over_M
-    theta = traj.theta
-    phi = traj.phi
+        # 1. 粒子轨道的笛卡尔坐标 (x, y, z)
+        r = traj.r_over_M
+        theta = traj.theta
+        phi = traj.phi
 
-    sin_th = np.sin(theta)
-    cos_th = np.cos(theta)
-    cos_ph = np.cos(phi)
-    sin_ph = np.sin(phi)
+        sin_th = np.sin(theta)
+        cos_th = np.cos(theta)
+        cos_ph = np.cos(phi)
+        sin_ph = np.sin(phi)
 
-    x = r * sin_th * cos_ph
-    y = r * sin_th * sin_ph
-    z = r * cos_th
+        x = r * sin_th * cos_ph
+        y = r * sin_th * sin_ph
+        z = r * cos_th
 
-    # 2. 质量四极矩 I_ij = μ x_i x_j（几何单位）
-    mu_geom = params.mu
+        # 2. 质量四极矩 I_ij = μ x_i x_j（几何单位）
+        mu_geom = params.mu
 
-    I_xx = mu_geom * x * x
-    I_yy = mu_geom * y * y
-    I_zz = mu_geom * z * z
-    I_xy = mu_geom * x * y
-    I_xz = mu_geom * x * z
-    I_yz = mu_geom * y * z
+        I_xx = mu_geom * x * x
+        I_yy = mu_geom * y * y
+        I_zz = mu_geom * z * z
+        I_xy = mu_geom * x * y
+        I_xz = mu_geom * x * z
+        I_yz = mu_geom * y * z
 
-    # 3. 二阶时间导数
-    I_xx_ddot = _second_time_derivative(I_xx, dt)
-    I_yy_ddot = _second_time_derivative(I_yy, dt)
-    I_zz_ddot = _second_time_derivative(I_zz, dt)
-    I_xy_ddot = _second_time_derivative(I_xy, dt)
-    I_xz_ddot = _second_time_derivative(I_xz, dt)
-    I_yz_ddot = _second_time_derivative(I_yz, dt)
+        # 3. 二阶时间导数
+        I_xx_ddot = _second_time_derivative(I_xx, dt)
+        I_yy_ddot = _second_time_derivative(I_yy, dt)
+        I_zz_ddot = _second_time_derivative(I_zz, dt)
+        I_xy_ddot = _second_time_derivative(I_xy, dt)
+        I_xz_ddot = _second_time_derivative(I_xz, dt)
+        I_yz_ddot = _second_time_derivative(I_yz, dt)
 
-    # 4. 四极公式：h_ij = (2 / D_L) * d²I_ij/dt²
-    prefactor = 2.0 / D_L
+        # 4. 四极公式：h_ij = (2 / D_L) * d²I_ij/dt²
+        prefactor = 2.0 / D_L
 
-    h_xx = prefactor * I_xx_ddot
-    h_yy = prefactor * I_yy_ddot
-    h_zz = prefactor * I_zz_ddot
-    h_xy = prefactor * I_xy_ddot
-    h_xz = prefactor * I_xz_ddot
-    h_yz = prefactor * I_yz_ddot
+        h_xx = prefactor * I_xx_ddot
+        h_yy = prefactor * I_yy_ddot
+        h_zz = prefactor * I_zz_ddot
+        h_xy = prefactor * I_xy_ddot
+        h_xz = prefactor * I_xz_ddot
+        h_yz = prefactor * I_yz_ddot
 
-    # 5. 极化投影
-    if n_obs is None:
-        n_obs = np.array([0.0, 0.0, 1.0])  # face-on
+        # 5. 极化投影
+        if n_obs is None:
+            n_obs = np.array([0.0, 0.0, 1.0])  # face-on
 
-    p, q, n = _orthonormal_basis_from_n(n_obs)
+        p, q, n = _orthonormal_basis_from_n(n_obs)
 
-    e_plus = np.outer(p, p) - np.outer(q, q)
-    e_cross = np.outer(p, q) - np.outer(q, p)
+        e_plus = np.outer(p, p) - np.outer(q, q)
+        e_cross = np.outer(p, q) - np.outer(q, p)
 
-    N = t.size
-    h_plus = np.zeros(N, dtype=float)
-    h_cross = np.zeros(N, dtype=float)
+        N = t.size
+        h_plus = np.zeros(N, dtype=float)
+        h_cross = np.zeros(N, dtype=float)
 
-    for k in range(N):
-        Hk = np.array(
-            [
-                [h_xx[k], h_xy[k], h_xz[k]],
-                [h_xy[k], h_yy[k], h_yz[k]],
-                [h_xz[k], h_yz[k], h_zz[k]],
-            ],
-            dtype=float,
-        )
-        h_plus[k] = np.sum(Hk * e_plus)
-        h_cross[k] = np.sum(Hk * e_cross)
+        for k in range(N):
+            Hk = np.array(
+                [
+                    [h_xx[k], h_xy[k], h_xz[k]],
+                    [h_xy[k], h_yy[k], h_yz[k]],
+                    [h_xz[k], h_yz[k], h_zz[k]],
+                ],
+                dtype=float,
+            )
+            h_plus[k] = np.sum(Hk * e_plus)
+            h_cross[k] = np.sum(Hk * e_cross)
+        return NKPolarizations(t=t, h_plus=h_plus, h_cross=h_cross)
 
-    return NKPolarizations(t=t, h_plus=h_plus, h_cross=h_cross)
+    elif params.multipole_order == "quad+oct":
+        h_plus, h_cross = _nk_quadrupole_plus_octupole(...)
+    else:
+        raise ValueError(f"Unknown multipole_order: {params.multipole_order}")
+    return h_plus, h_cross
+    
+    

@@ -65,6 +65,36 @@ class NKOrbitTrajectory:
     r_over_M: np.ndarray
     theta: np.ndarray
     phi: np.ndarray
+def _ELQ_from_peiota(
+    M: float, a: float, p: float, e: float, iota: float
+) -> Tuple[float, float, float]:
+    """
+    从 (p, e, iota) 近似构造 Kerr 测地线不变量 (E, Lz, Q)。
+
+    参考：
+    - Gair & Glampedakis 2006, Phys. Rev. D 73, 064037（特别是 Sec. II
+      中给出的 (E, Lz, Q) 拟合公式）；
+    - 对于极端情况可以 fallback 到 Schmidt 2002 的解析表达式。
+    """
+    # TODO: 根据 GG06 的拟合公式，把 E(p,e,ι), Lz(p,e,ι), Q(p,e,ι) 写进来
+    raise NotImplementedError
+
+
+def _kerr_geodesic_frequencies(
+    M: float, a: float, p: float, e: float, iota: float
+) -> Tuple[float, float, float]:
+    """
+    使用 Kerr 测地线的基本频率 (Ω_r, Ω_θ, Ω_φ) 代替后开普勒频率。
+
+    典型做法：
+    1. (p,e,ι) -> (E, Lz, Q)
+    2. (E,Lz,Q) -> (Ω_r, Ω_θ, Ω_φ) [Schmidt 2002; Fujita & Hikida 2009]
+
+    目前先搭结构，具体公式可在下一步填入。
+    """
+    E, Lz, Q = _ELQ_from_peiota(M, a, p, e, iota)
+    # TODO: 根据 Schmidt/Fujita-Hikida 的公式构造 Ω_r, Ω_θ, Ω_φ
+    raise NotImplementedError
 
 
 # ====== Kerr 频率的简化近似（占位：后续可替换成真 Kerr 频率）======
@@ -156,19 +186,14 @@ def _nk_adiabatic_rhs(
 
     from .evolution_pn_fluxes import peters_mathews_fluxes
 
-    dp_dt_pm, de_dt_pm = peters_mathews_fluxes(
-        p_dimless=p,
-        e=e,
-        M_solar=M_solar,
-        mu_solar=mu_solar,
-    )
+    dp_dt, de_dt, diota_dt = compute_nk_fluxes(p_dimless=p, e=e, iota=iota,a_spin=a_spin,M_solar=M_solar,mu_solar=mu_solar,scheme=scheme,)
     diota_dt = 0.0  # GHK 原始假设：倾角基本不变；Ryan/GG06 会给出修正。:contentReference[oaicite:8]{index=8}
 
     # --- 2. 快变量：多频结构 ---
-    Omega_r, Omega_theta, Omega_phi = _approximate_kerr_frequencies(
-        M_solar=M_solar,
-        a_spin=a_spin,
-        p_dimless=p,
+    Omega_r, Omega_theta, Omega_phi = _kerr_geodesic_frequencies(
+        M=M_solar,
+        a=a_spin,
+        p=p,
         e=e,
         iota=iota,
     )
@@ -185,9 +210,9 @@ def _nk_adiabatic_rhs(
 
 
 # ====== 主接口：evolve_nk_orbit ======
-
+from ..parameters import NKParameters, WaveformConfig
 def evolve_nk_orbit(
-    params: EMRIParameters,
+    params: NKParameters,
     config: WaveformConfig,
 ) -> NKOrbitTrajectory:
     """

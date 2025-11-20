@@ -22,9 +22,11 @@ from ..parameters import EMRIParameters, WaveformConfig
 from ..orbits.nk_geodesic_orbit import evolve_nk_orbit
 from ..waveforms.nk_waveform import generate_nk_polarizations
 from ..lisa.response_approx import project_to_lisa_channels
+from ..parameters import NKParameters, WaveformConfig
+
 
 def generate_nk_waveform_cpu(
-    params: EMRIParameters,
+    params: NKParameters,
     config: WaveformConfig,
     D_L: float = 1.0,
     n_obs: Optional[np.ndarray] = None,
