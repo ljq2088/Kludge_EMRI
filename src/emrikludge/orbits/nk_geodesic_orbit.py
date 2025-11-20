@@ -225,8 +225,11 @@ def evolve_nk_orbit(
 
     psi_r0 = 0.0
     psi_theta0 = 0.0
-    psi_phi0 = params.phi0  # 如果你在 EMRIParameters 里有初始 azimuth，相当于 psi_phi 的初值
 
+    # 如果 params 没有 phi0，就默认为 0.0
+    psi_phi0 = getattr(params, "phi0", 0.0)
+
+    
     y0 = np.array([p0, e0, iota0, psi_r0, psi_theta0, psi_phi0], dtype=float)
 
     t0 = 0.0

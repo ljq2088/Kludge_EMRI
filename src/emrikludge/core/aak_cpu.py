@@ -111,9 +111,9 @@ from ..parameters import EMRIParameters, WaveformConfig
 from ..orbits.aak_osculating_orbit import evolve_aak_orbit
 from ..waveforms.aak_waveform import (
     generate_aak_polarizations,
-    project_to_lisa_channels,
+   
 )
-
+from ..lisa.response_approx import project_to_lisa_channels
 
 
 def generate_aak_waveform_cpu(params: EMRIParameters,

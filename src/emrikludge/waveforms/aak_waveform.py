@@ -227,54 +227,54 @@ def generate_aak_polarizations(
 
 from typing import Optional
 
-def project_to_lisa_channels(t,h_plus: np.ndarray,
-                             h_cross: np.ndarray,
-                             params: Optional[EMRIParameters] = None,
-    config: Optional[WaveformConfig] = None,) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    将 (h_+, h_x) 投影到两个独立的 LISA-like 通道 (h_I, h_II)。
+# def project_to_lisa_channels(t,h_plus: np.ndarray,
+#                              h_cross: np.ndarray,
+#                              params: Optional[EMRIParameters] = None,
+#     config: Optional[WaveformConfig] = None,) -> Tuple[np.ndarray, np.ndarray]:
+#     """
+#     将 (h_+, h_x) 投影到两个独立的 LISA-like 通道 (h_I, h_II)。
 
-    这里先使用极简的“定向天线 pattern”：
-        h_I  = F_I^+ h_+ + F_I^× h_×
-        h_II = F_{II}^+ h_+ + F_{II}^× h_×
+#     这里先使用极简的“定向天线 pattern”：
+#         h_I  = F_I^+ h_+ + F_I^× h_×
+#         h_II = F_{II}^+ h_+ + F_{II}^× h_×
 
-    F^+, F^× 只依赖 source angles 和 polarization angle，
-    具体表达式参考 LISA 低频极限近似。
+#     F^+, F^× 只依赖 source angles 和 polarization angle，
+#     具体表达式参考 LISA 低频极限近似。
 
-    将来你可以在 lisa/response_approx.py 或 tdi_response.py 里
-    实现更精确的 TDI 响应，并在这里调用。
-    params, config : 可选
-        EMRIParameters 和 WaveformConfig，用于未来扩展。
-    """
-    # 简单的天线 pattern（取 LISA 低频极限的形式）：
-    theta = params.theta_S
-    phi = params.phi_S
-    psi = params.psi
+#     将来你可以在 lisa/response_approx.py 或 tdi_response.py 里
+#     实现更精确的 TDI 响应，并在这里调用。
+#     params, config : 可选
+#         EMRIParameters 和 WaveformConfig，用于未来扩展。
+#     """
+#     # 简单的天线 pattern（取 LISA 低频极限的形式）：
+#     theta = params.theta_S
+#     phi = params.phi_S
+#     psi = params.psi
 
-    # 下面是标准地面 interferometer 的 F^+, F^× 形式，
-    # 作为占位用；LISA 实际 pattern 会随时间变化：
-    cos2psi = np.cos(2.0 * psi)
-    sin2psi = np.sin(2.0 * psi)
-    cos2phi = np.cos(2.0 * phi)
-    sin2phi = np.sin(2.0 * phi)
-    costheta = np.cos(theta)
-    sintheta = np.sin(theta)
+#     # 下面是标准地面 interferometer 的 F^+, F^× 形式，
+#     # 作为占位用；LISA 实际 pattern 会随时间变化：
+#     cos2psi = np.cos(2.0 * psi)
+#     sin2psi = np.sin(2.0 * psi)
+#     cos2phi = np.cos(2.0 * phi)
+#     sin2phi = np.sin(2.0 * phi)
+#     costheta = np.cos(theta)
+#     sintheta = np.sin(theta)
 
-    F_plus = 0.5 * (1.0 + costheta**2) * cos2phi * cos2psi \
-        - costheta * sin2phi * sin2psi
-    F_cross = 0.5 * (1.0 + costheta**2) * cos2phi * sin2psi \
-        + costheta * sin2phi * cos2psi
+#     F_plus = 0.5 * (1.0 + costheta**2) * cos2phi * cos2psi \
+#         - costheta * sin2phi * sin2psi
+#     F_cross = 0.5 * (1.0 + costheta**2) * cos2phi * sin2psi \
+#         + costheta * sin2phi * cos2psi
 
-    # 两个“虚拟”通道，可以简单地取旋转 45°
-    F_plus_I = F_plus
-    F_cross_I = F_cross
-    F_plus_II = F_plus * np.cos(np.pi / 4.0) - F_cross * np.sin(np.pi / 4.0)
-    F_cross_II = F_plus * np.sin(np.pi / 4.0) + F_cross * np.cos(np.pi / 4.0)
+#     # 两个“虚拟”通道，可以简单地取旋转 45°
+#     F_plus_I = F_plus
+#     F_cross_I = F_cross
+#     F_plus_II = F_plus * np.cos(np.pi / 4.0) - F_cross * np.sin(np.pi / 4.0)
+#     F_cross_II = F_plus * np.sin(np.pi / 4.0) + F_cross * np.cos(np.pi / 4.0)
 
-    h_I = F_plus_I * h_plus + F_cross_I * h_cross
-    h_II = F_plus_II * h_plus + F_cross_II * h_cross
+#     h_I = F_plus_I * h_plus + F_cross_I * h_cross
+#     h_II = F_plus_II * h_plus + F_cross_II * h_cross
 
-    return h_I, h_II
+#     return h_I, h_II
 # # src/emrikludge/waveforms/aak_waveform.py
 # from __future__ import annotations
 
