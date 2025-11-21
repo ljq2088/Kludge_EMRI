@@ -347,7 +347,6 @@ class BabakNKOrbit:
         dpsi_dt = np.abs(dpsi_dt)
         
         dphi_dt = V_phi / V_t
-        
         # 3. 计算辐射反作用 (dp/dt, de/dt, diota/dt)
         #    使用 0PN 公式作为 baseline
         fluxes = compute_nk_fluxes(p, e, iota, self.a, self.M_phys, self.mu_phys, 
