@@ -33,7 +33,7 @@ def _radial_potential_deriv(r, M, a, E, Lz, Q):
     v_minus = _radial_potential(r - eps, M, a, E, Lz, Q)
     return (v_plus - v_minus) / (2 * eps)
 try:
-    from .._emrikludge import get_conserved_quantities_cpp
+    from emrikludge._emrikludge import get_conserved_quantities_cpp
     USE_CPP = True
     print("[NK Mapping] C++ extension loaded successfully. Acceleration ON 🚀")
 except ImportError:
