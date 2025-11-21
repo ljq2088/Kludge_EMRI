@@ -273,204 +273,127 @@
 #     else:
 #         raise ValueError(f"Unknown NK flux scheme: {scheme}")
 # src/emrikludge/orbits/nk_fluxes.py
+# src/emrikludge/orbits/nk_fluxes.py
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, Literal
+from typing import Literal
+# 假设 evolution_pn_fluxes 已存在且包含 peters_mathews_fluxes
 from .evolution_pn_fluxes import peters_mathews_fluxes
 
-# 引入工具函数，用于坐标转换 (需要你确认 nk_waveform.py 中是否有此函数，或者我们在此处重写一个轻量版的)
+@dataclass
+class NKFluxes:
+    """
+    存放 NK 轨道能流。包含守恒量通量(用于诊断)和轨道参数导数(用于演化)。
+    """
+    dE_dt: float = 0.0    # 能量通量 (GW 辐射带走, >0)
+    dLz_dt: float = 0.0   # 角动量通量
+    dQ_dt: float = 0.0    # Carter 常数通量
+    dp_dt: float = 0.0    # 半通径变化率 (通常 <0)
+    de_dt: float = 0.0    # 偏心率变化率 (通常 <0)
+    diota_dt: float = 0.0 # 倾角变化率
+
 def _get_minkowski_trajectory(r, theta, phi):
-    """
-    将 BL 坐标 (r, theta, phi) 转换为平直空间笛卡尔坐标 (x, y, z)。
-    """
+    """将 BL 坐标 (r, theta, phi) 转换为平直空间笛卡尔坐标 (x, y, z)。"""
     sin_theta = np.sin(theta)
     x = r * sin_theta * np.cos(phi)
     y = r * sin_theta * np.sin(phi)
     z = r * np.cos(theta)
     return np.stack([x, y, z], axis=0)
 
-@dataclass
-class NKFluxes:
-    # 修改定义，使其既能存 E, Lz 也能存 p, e 的导数
-    dE_dt: float = 0.0
-    dLz_dt: float = 0.0
-    dQ_dt: float = 0.0
-    dp_dt: float = 0.0
-    de_dt: float = 0.0
-    diota_dt: float = 0.0
-
 def _compute_stf_tensor_2(T_ij):
     """计算 2 阶张量的 STF (Symmetric Trace-Free) 部分"""
-    # T shape: (3, 3, N)
-    # 1. Symmetrize
     S_ij = 0.5 * (T_ij + np.transpose(T_ij, (1, 0, 2)))
-    # 2. Remove Trace
     trace = np.einsum('iit->t', S_ij)
     delta = np.eye(3)[:, :, np.newaxis]
-    STF_ij = S_ij - (1.0/3.0) * trace * delta
-    return STF_ij
+    return S_ij - (1.0/3.0) * trace * delta
 
 def _compute_stf_tensor_3(T_ijk):
-    """
-    计算 3 阶张量的 STF 部分。
-    简化处理：Mass Octupole M_ijk = x_i x_j x_k 本身就是全对称的。
-    只需要移除 Trace。
-    Trace: T_iik
-    STF_ijk = T_ijk - (1/5) * (delta_ij T_llk + delta_ik T_llj + delta_jk T_lli)
-    """
-    # T shape: (3, 3, 3, N)
-    # 假设 T 已经是全对称的 (对于 M_ijk = x_i x_j x_k 成立)
-    
-    # Trace vector V_k = T_iik
+    """计算 3 阶张量的 STF 部分 (Mass Octupole)"""
     V_k = np.einsum('iit->kt', T_ijk)
-    
     delta = np.eye(3)
     term2 = np.zeros_like(T_ijk)
-    
-    # 构造 delta_ij V_k + ...
-    # 使用循环清晰一点，或者 einsum
-    # term2_ijk = delta_ij V_k + delta_ik V_j + delta_jk V_i
     for i in range(3):
         for j in range(3):
             for k in range(3):
                 term2[i,j,k,:] = delta[i,j]*V_k[k,:] + delta[i,k]*V_k[j,:] + delta[j,k]*V_k[i,:]
-                
-    STF_ijk = T_ijk - (1.0/5.0) * term2
-    return STF_ijk
+    return T_ijk - (1.0/5.0) * term2
 
 def compute_numerical_fluxes(trajectory, mu_code, M_code, dt_code) -> NKFluxes:
     """
-    根据 Babak et al. (2007) Eq. 43, 44 计算数值能流。
-    使用数值微分和时间平均。
-    
-    参数:
-        trajectory: NKOrbitTrajectory (包含 r, theta, phi, t)
-        mu_code: 质量比 mu/M (几何单位)
-        M_code: 主黑洞质量 (几何单位，通常为 1.0)
-        dt_code: 时间步长 (几何单位)
-    
-    返回:
-        NKFluxes (平均能流)
+    根据 Babak et al. (2007) Eq. 43, 44 计算数值能流 <dE/dt>, <dLz/dt>。
+    注意：此函数只计算守恒量的通量，不直接提供 dp/dt, de/dt。
     """
-    # 1. 获取轨迹 (3, N)
     x_vec = _get_minkowski_trajectory(trajectory.r, trajectory.theta, trajectory.phi)
-    
-    # 2. 计算速度 v (3, N)
     v_vec = np.gradient(x_vec, dt_code, axis=1, edge_order=2)
     
-    # 3. 计算原始多极矩 (Primitive Moments)
-    # I_ij = mu * x_i * x_j
+    # 原始多极矩
     I_raw = mu_code * np.einsum('it,jt->ijt', x_vec, x_vec)
-    
-    # M_ijk = mu * x_i * x_j * x_k
     M_raw = mu_code * np.einsum('it,jt,kt->ijkt', x_vec, x_vec, x_vec)
-    
-    # S_ijk = mu * v_i * x_j * x_k (用于计算 J)
-    # 注意 Babak 定义 J_ij = epsilon_jlm S_mli
     S_raw = mu_code * np.einsum('it,jt,kt->ijkt', v_vec, x_vec, x_vec)
     
-    # 4. 计算 Radiative STF Tensors
-    
-    # (1) Mass Quadrupole I
+    # STF 多极矩
     I_STF = _compute_stf_tensor_2(I_raw)
+    M_STF = _compute_stf_tensor_3(M_raw)
     
-    # (2) Current Quadrupole J
-    # J_ab = epsilon_amn S_mnb
-    # 这是一个反对称操作。S_mnb = v_m x_n x_b
-    # J_ab ~ eps_amn v_m x_n x_b ~ (v x x)_a x_b
-    # 也就是 J_ab = mu * (L_orb)_a * x_b  (L_orb 是轨道角动量密度)
-    # 严格按照公式实现:
+    # Current Quadrupole J_ij
     epsilon = np.zeros((3,3,3))
     epsilon[0,1,2] = epsilon[1,2,0] = epsilon[2,0,1] = 1
     epsilon[0,2,1] = epsilon[2,1,0] = epsilon[1,0,2] = -1
-    
-    # J_ij(t) = sum_{l,m} eps_ilm S_lmj
-    # einsum: i=j(formula), j=l, k=m in code? 
-    # Babak: J^{jk} = eps_{jlm} S^{mlk} (indices adjusted for waveform frame?)
-    # Let's stick to standard index notation J_ij = eps_ipq S_pqj
     J_raw = np.einsum('ipq,pqjt->ijt', epsilon, S_raw)
-    
-    # J 应该是 STF 的
     J_STF = _compute_stf_tensor_2(J_raw)
     
-    # (3) Mass Octupole M
-    M_STF = _compute_stf_tensor_3(M_raw)
-    
-    # 5. 数值求导
-    # I: 3阶导
+    # 数值求导
     d1_I = np.gradient(I_STF, dt_code, axis=2, edge_order=2)
     d2_I = np.gradient(d1_I, dt_code, axis=2, edge_order=2)
     d3_I = np.gradient(d2_I, dt_code, axis=2, edge_order=2)
     
-    # J: 3阶导 (Babak Eq 43 term 16/9 J^(3))
     d1_J = np.gradient(J_STF, dt_code, axis=2, edge_order=2)
     d2_J = np.gradient(d1_J, dt_code, axis=2, edge_order=2)
     d3_J = np.gradient(d2_J, dt_code, axis=2, edge_order=2)
     
-    # M: 4阶导 (Babak Eq 43 term 5/189 M^(4))
     d1_M = np.gradient(M_STF, dt_code, axis=3, edge_order=2)
     d2_M = np.gradient(d1_M, dt_code, axis=3, edge_order=2)
     d3_M = np.gradient(d2_M, dt_code, axis=3, edge_order=2)
     d4_M = np.gradient(d3_M, dt_code, axis=3, edge_order=2)
     
-    # 6. 组合求 Flux (瞬时值)
-    # Eq 43: <E_dot> = -1/5 < I(3)^2 + 16/9 J(3)^2 + 5/189 M(4)^2 >
-    # 我们先算瞬时值，最后再平均
-    
+    # Energy Flux Eq 43
     term_I = np.einsum('ijt,ijt->t', d3_I, d3_I)
     term_J = np.einsum('ijt,ijt->t', d3_J, d3_J)
     term_M = np.einsum('ijkt,ijkt->t', d4_M, d4_M)
-    
-    # Energy Flux (瞬时功率，总是正值表示辐射出去，公式里带负号表示轨道能量损失)
-    # Babak 公式给的是 dE/dt (orbit) = - Flux，所以是负的
     flux_E_inst = - (1.0/5.0) * term_I - (16.0/45.0) * term_J - (5.0/189.0) * term_M
     
-    # Angular Momentum Flux (Lz) Eq 44
-    # L_dot_i = -2/5 eps_ikl < I''ka I'''al + ... >
-    # 我们只关注 z 分量 (i=2, index 0,1,2) -> i=2
-    # eps_2kl -> k=0,l=1 (1) or k=1,l=0 (-1)
-    # Term 1: I
-    # eps_ikl I_ka^(2) I_al^(3)
-    L_dot_vec = np.zeros((3, len(trajectory.t)))
-    
-    # 计算叉乘项 (I'' x I''')_i = eps_ikl I''_km I'''_ml ? No
-    # 它是 eps_ikl (I''_ka I'''_al) -> trace over a
-    I_2 = d2_I
-    I_3 = d3_I
-    # Matrix product I''_ka I'''_al -> P_kl
+    # Angular Momentum Flux Eq 44 (Lz component)
+    I_2, I_3 = d2_I, d3_I
     P_kl = np.einsum('kat,alt->klt', I_2, I_3)
-    # eps_ikl P_kl
     term_L_I = np.einsum('ikl,klt->it', epsilon, P_kl)
     
-    # Term 2: J (16/9)
-    # J has same structure as I in Eq 44
-    J_2 = d2_J
-    J_3 = d3_J
+    J_2, J_3 = d2_J, d3_J
     P_J_kl = np.einsum('kat,alt->klt', J_2, J_3)
     term_L_J = np.einsum('ikl,klt->it', epsilon, P_J_kl)
     
-    # Term 3: M (5/126)
-    # M'''_kab M''''_lab
-    M_3 = d3_M
-    M_4 = d4_M
+    M_3, M_4 = d3_M, d4_M
     P_M_kl = np.einsum('kabt,labt->klt', M_3, M_4)
     term_L_M = np.einsum('ikl,klt->it', epsilon, P_M_kl)
     
-    L_dot_vec = - (2.0/5.0) * term_L_I \
-                - (32.0/45.0) * term_L_J \
-                - (1.0/63.0) * term_L_M  # (2/5 * 5/126 = 1/63)
-                
-    flux_Lz_inst = L_dot_vec[2, :] # z component
+    L_dot_vec = - (2.0/5.0) * term_L_I - (32.0/45.0) * term_L_J - (1.0/63.0) * term_L_M
+    flux_Lz_inst = L_dot_vec[2, :]
     
-    # 7. 时间平均
-    # 简单的均值
-    avg_dE_dt = np.mean(flux_E_inst)
-    avg_dLz_dt = np.mean(flux_Lz_inst)
-    
-    return NKFluxes(dE_dt=avg_dE_dt, dLz_dt=avg_dLz_dt, dQ_dt=0.0)
+    return NKFluxes(dE_dt=np.mean(flux_E_inst), dLz_dt=np.mean(flux_Lz_inst), dQ_dt=0.0)
 
-# 保持原有的 compute_nk_fluxes 接口
+def nk_fluxes_peters_ghk(p_dimless, e, iota, M_solar, mu_solar):
+    """
+    0PN Peters-Mathews 通量。
+    直接返回 dp/dt, de/dt 以驱动 Inspiral 演化。
+    """
+    # 调用 evolution_pn_fluxes 中已实现的公式
+    # 确保该模块返回的是几何单位下的 dp/dt (即 d(p)/d(t_M))
+    dp, de = peters_mathews_fluxes(p_dimless, e, M_solar, mu_solar)
+    
+    # 对于 0PN 近似，通常假设 dE/dt, dL/dt 也可以由 Newtonian 关系推导
+    # 但对于驱动 Inspiral，dp_dt 和 de_dt 是必须的
+    return NKFluxes(dp_dt=dp, de_dt=de, diota_dt=0.0)
+
 def compute_nk_fluxes(p_dimless: float,
                       e: float,
                       iota: float,
@@ -481,35 +404,9 @@ def compute_nk_fluxes(p_dimless: float,
                                       "ryan_leading",
                                       "gg06_2pn"] = "peters_ghk") -> NKFluxes:
     """
-    原有接口：用于 Evolution (Inspiral)。
-    目前只包含解析公式 (PN)。
-    如果用户想用数值能流驱动演化，需要在这里调用 compute_numerical_fluxes，
-    但这需要先积分一段轨道，开销很大。通常只用于 Snapshot 验证。
+    对外接口：计算驱动轨道演化的通量 (dp/dt, de/dt)。
     """
     if scheme == "peters_ghk" or scheme == "PM":
         return nk_fluxes_peters_ghk(p_dimless, e, iota, M_solar, mu_solar)
     else:
         raise NotImplementedError(f"Flux scheme {scheme} not implemented yet")
-
-def nk_fluxes_peters_ghk(p_dimless, e, iota, M_solar, mu_solar):
-    # 复用之前的实现
-    dp_dt, de_dt = peters_mathews_fluxes(p_dimless, e, M_solar, mu_solar)
-    # ... (转换逻辑同之前) ...
-    # 为节省篇幅，此处略，请确保保留之前文件的转换逻辑
-    # 建议直接把之前的文件内容合并进来
-    pass
-
-def nk_fluxes_peters_ghk(p_dimless, e, iota, M_solar, mu_solar):
-    # 调用 Peters-Mathews 公式 (0PN)
-    # dp/dt, de/dt 是几何单位还是物理单位？
-    # peters_mathews_fluxes 内部通常返回的是 dimensionless rate? 
-    # 或者是 d(p/M)/dt_sec? 
-    # 我们要确保它是 d(p)/d(t_M) (全几何单位)
-    
-    # 假设 evolution_pn_fluxes.py 里的实现是返回几何单位导数
-    # 常见的 PM 公式: dp/dt = -64/5 * q * (1/p^3) * ...
-    
-    from .evolution_pn_fluxes import peters_mathews_fluxes
-    dp, de = peters_mathews_fluxes(p_dimless, e, M_solar, mu_solar)
-    
-    return NKFluxes(dp_dt=dp, de_dt=de, diota_dt=0.0)
