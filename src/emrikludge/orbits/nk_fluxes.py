@@ -266,5 +266,9 @@ def compute_nk_fluxes(p_dimless: float,
             M_solar=M_solar,
             mu_solar=mu_solar,
         )
+    elif scheme == "PM":
+        return nk_fluxes_peters_ghk(p_dimless=p_dimless,
+                                         e=e, iota=iota,
+                                         M_solar=M_solar, mu_solar=mu_solar)
     else:
         raise ValueError(f"Unknown NK flux scheme: {scheme}")

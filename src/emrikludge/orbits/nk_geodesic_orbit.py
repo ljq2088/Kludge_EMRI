@@ -177,6 +177,11 @@ def _nk_adiabatic_rhs(
         mu_solar=mu_solar,
         scheme="peters_ghk",
     )
+    # 选择通量模型
+    scheme = getattr(params, "nk_flux_model", None)
+    if scheme is None:
+        scheme = config.flux_model
+
 
     # 目前 nk_fluxes_peters_ghk 是用 PM 通量 + Newtonian 链式法则得到 (dE, dL)，
     # 并没有直接返回 dp/dt, de/dt, diota/dt，所以这里暂时：
