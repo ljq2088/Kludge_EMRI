@@ -35,17 +35,34 @@ KerrConstants BabakNKOrbit::get_conserved_quantities(double M, double a, double 
     double r_p = p / (1.0 + e);
     double r_a = p / (1.0 - e);
     
-    // 🛡️【改进】使用 Schwarzschild 圆轨道公式作为初始猜测
-    // E_schw = sqrt((r-2)/r) 对于 e=0. 对于一般轨道，用 p 的有效势估计。
-    // 这里使用简单的 Schwarzschild 能量公式作为起点，比 0.93 强得多。
-    double num = p - 2.0 - 2.0*e;
-    if (num < 0.1) num = 0.1; // 保护
-    double den = p * (1.0 + e);
-    double E_guess = sqrt(num / den);
+    // 理论公式: E^2 = [ (p-2-2e)(p-2+2e) ] / [ p(p-3-e^2) ]
+    //          L^2 = p^2 / (p-3-e^2)
+    
+    // 分母项 (反映了 ISCO/Whirl 附近的强场发散)
+    double denom_factor = p - 3.0 - e*e;
+    
+    // 安全保护：如果 p 过于接近不稳定区域 (p ~ 3+e^2)，分母会趋于 0
+    // 我们给它一个软下限，防止初值变成 inf
+    if (denom_factor < 0.01) denom_factor = 0.01;
+    
+    // 计算 Schwarzschild 能量 E
+    double num_E = (p - 2.0 - 2.0*e) * (p - 2.0 + 2.0*e);
+    // 保护根号下不为负
+    if (num_E < 0.0) num_E = 0.0; 
+    
+    double E_schw_sq = num_E / (p * denom_factor);
+    double E_guess = sqrt(E_schw_sq);
+    
+    // 计算 Schwarzschild 角动量 L (Total L)
+    double L_schw_sq = (p * p) / denom_factor;
+    double L_schw = sqrt(L_schw_sq);
     
     double E = E_guess;
-    double Lz = sqrt(p*M_code) * cos(iota);
-    double Q = p*M_code * pow(sin(iota), 2);
+    // 将 Schwarzschild 的总角动量 L 投影到 Kerr 的 Lz 和 Q
+    // Lz ~ L * cos(iota)
+    // Q  ~ L^2 * sin^2(iota)
+    double Lz = L_schw * cos(iota);
+    double Q = L_schw_sq * pow(sin(iota), 2);
     
     // Newton-Raphson 迭代配置
     const int MAX_ITER = 100;

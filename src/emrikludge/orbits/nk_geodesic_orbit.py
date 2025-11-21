@@ -151,7 +151,7 @@ class BabakNKOrbit:
         
         # 只有当 t 向前推进了才打印 (避免试探步的回退造成困惑)
         if current_dt > 0:
-             self._print_progress(t) # 需要修改 _print_progress 接收 dt
+             self._print_progress(t, current_dt) # 需要修改 _print_progress 接收 dt
         p, e, iota, psi, chi, phi = y
         try:
             k = self._get_constants_fast(p, e, iota)
@@ -240,8 +240,6 @@ class BabakNKOrbit:
         
         if not self.do_inspiral:
             return self._evolve_geodesic(t_duration, dt)
-        if not self.do_inspiral:
-            return self._evolve_geodesic(t_duration, dt)
         
         # Inspiral 演化 (6维 ODE)
         t_span = [0, t_duration]
@@ -266,7 +264,9 @@ class BabakNKOrbit:
             events=[plunge_event, unbound_event_e],
             dense_output=True
         )
-        
+        # 积分结束，打印换行并清理行
+        sys.stdout.write(f"\r[Integrator] Finished at t = {sol.t[-1]:.1f} M.                          \n")
+        sys.stdout.flush()
         # 重采样
         t_uniform = np.arange(0, sol.t[-1], dt)
         y_uniform = sol.sol(t_uniform)
@@ -305,7 +305,7 @@ class BabakNKOrbit:
             rtol=1e-9, atol=1e-9,
             dense_output=True
         )
-        
+        sys.stdout.write(f"\r[Integrator] Finished at t = {sol.t[-1]:.1f} M.\n")
         t_uniform = np.arange(0, t_duration, dt)
         y_uniform = sol.sol(t_uniform)
         
