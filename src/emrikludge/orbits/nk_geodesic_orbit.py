@@ -191,7 +191,7 @@ class NKOrbitTrajectory:
         return self.r_over_M
 
 class BabakNKOrbit:
-    def __init__(self, M, a, p, e, iota, mu=0.0):
+    def __init__(self, M, a, p, e, iota, mu=0.0,flux_scheme="gg06_2pn"):
         """
         初始化轨道。
         :param M: 主黑洞质量 (物理单位)
@@ -204,7 +204,7 @@ class BabakNKOrbit:
         self.M_phys = M
         self.M_code = 1.0     # 内部计算强制使用几何单位 M=1
         self.a = a
-        
+        self.flux_scheme = flux_scheme
         # 初始轨道参数
         self.p0 = p
         self.e0 = e
@@ -350,7 +350,8 @@ class BabakNKOrbit:
         
         # 3. 计算辐射反作用 (dp/dt, de/dt, diota/dt)
         #    使用 0PN 公式作为 baseline
-        fluxes = compute_nk_fluxes(p, e, iota, self.a, self.M_phys, self.mu_phys, scheme="peters_ghk")
+        fluxes = compute_nk_fluxes(p, e, iota, self.a, self.M_phys, self.mu_phys, 
+                                   scheme=self.flux_scheme)
         
         # nk_fluxes 返回的是几何单位下的导数 dp/dt (M单位时间)
         dp_dt = fluxes.dp_dt

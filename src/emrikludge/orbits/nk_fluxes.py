@@ -393,7 +393,317 @@ def nk_fluxes_peters_ghk(p_dimless, e, iota, M_solar, mu_solar):
     # 对于 0PN 近似，通常假设 dE/dt, dL/dt 也可以由 Newtonian 关系推导
     # 但对于驱动 Inspiral，dp_dt 和 de_dt 是必须的
     return NKFluxes(dp_dt=dp, de_dt=de, diota_dt=0.0)
+# src/emrikludge/orbits/nk_fluxes.py
 
+import numpy as np
+from dataclasses import dataclass
+from typing import Literal, Tuple
+
+# 引入 Mapping 模块用于计算雅可比矩阵
+from .nk_mapping import get_conserved_quantities, KerrConstants
+
+@dataclass
+class NKFluxes:
+    """
+    存放 NK 轨道能流。
+    既包含物理守恒量通量 (用于诊断)，也包含几何参数导数 (用于驱动演化)。
+    """
+    # 守恒量通量 (单位质量 Specific Fluxes)
+    dE_dt: float = 0.0    # d(E_spec)/dt
+    dLz_dt: float = 0.0   # d(Lz_spec)/dt
+    dQ_dt: float = 0.0    # d(Q_spec)/dt
+    
+    # 轨道几何参数导数 (用于积分器)
+    dp_dt: float = 0.0
+    de_dt: float = 0.0
+    diota_dt: float = 0.0
+
+# ==============================================================================
+# Gair & Glampedakis (2006) 2PN Flux Coefficients
+# ==============================================================================
+
+def _g_coeffs(e: float) -> dict:
+    """
+    计算 GG06 Eq. (39) 和 Eq. (46) 中的 g_n(e) 系数。
+    """
+    e2 = e*e
+    e4 = e2*e2
+    e6 = e4*e2
+    
+    g = {}
+    g[1] = 1 + (73/24)*e2 + (37/96)*e4
+    g[2] = (73/12) + (823/24)*e2 + (949/32)*e4 + (491/192)*e6
+    g[3] = (1247/336) + (9181/672)*e2
+    g[4] = 4 + (1375/48)*e2
+    g[5] = (44711/9072) + (172157/2592)*e2
+    g[6] = (33/16) + (359/32)*e2
+    g[7] = (8191/672) + (44531/336)*e2
+    g[8] = (3749/336) - (5143/168)*e2
+    g[9] = 1 + (7/8)*e2
+    g[10] = (61/12) + (119/8)*e2 + (183/32)*e4 # Eq 39 for equatorial
+    g[11] = (1247/336) + (425/336)*e2
+    g[12] = 4 + (97/8)*e2
+    g[13] = (44711/9072) + (302893/6048)*e2
+    g[14] = (33/16) + (95/16)*e2
+    g[15] = (8191/672) + (48361/1344)*e2
+    g[16] = (417/56) - (37241/672)*e2
+    
+    # Eq 46 (Split for inclined Lz)
+    g['10a'] = (61/24) + (63/8)*e2 + (95/64)*e4
+    g['10b'] = (61/8) + (91/4)*e2 + (461/64)*e4
+    
+    return g
+
+def _N_coeffs(p: float, M: float, a: float, E_circ: float, L_circ: float, iota: float) -> Tuple[float, float, float]:
+    """
+    计算 GG06 Eq. (10) 和 (15) 中的 N 系数，用于 Circular Fix。
+    这些系数需要在 e -> 0 的极限下计算 (即使用圆轨道的 E, L)。
+    """
+    # 注意：公式中的 N 是针对 r 的函数，但在 Eq 13/14 极限下，r -> p (对于 e=0)
+    # 实际上 Eq 11 提到 N1(p, iota) = N1(ra) = N2(rp) at e=0
+    
+    # Eq 10 N1 (at r=p)
+    # N1 = E*r^4 + a^2*E*r^2 - 2*a*M*(L - a*E)*r
+    # 使用 M_code = 1.0
+    N1 = E_circ * p**4 + (a**2) * E_circ * p**2 - 2*a*M * (L_circ - a*E_circ) * p
+    
+    # Eq 15 N4, N5
+    N4 = (2*M*p - p**2) * L_circ - 2*M*a*E_circ * p
+    N5 = (2*M*p - p**2 - a**2) / 2.0
+    
+    return N1, N4, N5
+
+# ==============================================================================
+# Core Flux Calculation (2PN + Corrections)
+# ==============================================================================
+
+def _calc_gg06_fluxes_raw(p: float, e: float, iota: float, a: float, M: float, mu: float) -> Tuple[float, float, float]:
+    """
+    计算 GG06 2PN 通量 (dE/dt, dLz/dt, dQ/dt)。
+    
+    返回的是【粒子总能量/角动量】的通量 (Total Fluxes)，量级为 mu^2。
+    遵循 Gair & Glampedakis (2006) Eqs 44, 45, 56。
+    """
+    # 预计算
+    q = a / M
+    v2 = M / p
+    v = np.sqrt(v2)
+    Mp = v2 # (M/p)
+    
+    # 角度函数
+    cos_i = np.cos(iota)
+    sin_i = np.sin(iota)
+    sin2_i = sin_i**2
+    cos2_i = cos_i**2
+    
+    g = _g_coeffs(e)
+    prefix = (1 - e*e)**1.5
+    
+    # --- Energy Flux (Eq 44) ---
+    # E_dot_2PN / factor
+    # factor = - (32/5) * (mu/M)^2 * (M/p)^5
+    factor_E = -(32.0/5.0) * (mu/M)**2 * (Mp**5)
+    
+    term_E = (
+        g[1] 
+        - q * (Mp**1.5) * g[2] * cos_i
+        - Mp * g[3]
+        + np.pi * (Mp**1.5) * g[4]
+        - (Mp**2) * g[5]
+        + (q**2) * (Mp**2) * g[6]
+        - (527.0/96.0) * (q**2) * (Mp**2) * sin2_i
+    )
+    E_dot_2PN = factor_E * prefix * term_E
+    
+    # --- Angular Momentum Flux (Eq 45) ---
+    # L_dot_2PN / factor_L
+    # factor_L = - (32/5) * (mu/M) * (M/p)^3.5
+    factor_L = -(32.0/5.0) * (mu/M) * (Mp**3.5)
+    
+    term_L = (
+        g[9] * cos_i
+        + q * (Mp**1.5) * (g['10a'] - cos2_i * g['10b'])
+        - Mp * g[11] * cos_i
+        + np.pi * (Mp**1.5) * g[12] * cos_i
+        - (Mp**2) * g[13] * cos_i
+        + (q**2) * (Mp**2) * cos_i * (g[14] - (45.0/8.0)*sin2_i)
+    )
+    L_dot_2PN = factor_L * prefix * term_L
+    
+    # --- Carter Constant Flux (Eq 56) ---
+    # 计算 dQ/dt。注意 Eq 56 给出的是 dQ/dt / sqrt(Q)。
+    # 我们需要计算出 Q 的值来恢复 dQ/dt。
+    # 这里需要调用 mapping 得到当前轨道的 Q_spec。
+    # 注意：Flux 公式里的 Q 通常指 Specific Q 还是 Total Q?
+    # Eq 56 右边系数: -(64/5) * (mu^2/M) ...
+    # 如果 Q 是 Specific (M^2)，sqrt(Q) ~ M. RHS ~ mu^2. dQ/dt ~ mu^2.
+    # Q_spec 变化率应该是 mu. 所以这里的公式算的是 d(Q_total)/dt ?
+    # 让我们看 Eq 23: Q_dot = ... Lz * Lz_dot ...
+    # 如果 Lz 是 total (~mu), Lz_dot (~mu^2) -> Q_dot ~ mu^3.
+    # Eq 56 RHS: mu^2 * sqrt(Q). 如果 Q is total (~mu^2), RHS ~ mu^3.
+    # 所以 Eq 56 是 Total Q 的公式。
+    
+    # 为了计算方便，我们先算出 Specific Q，再转为 Total Q
+    try:
+        k_consts = get_conserved_quantities(M, a, p, e, iota)
+        Q_spec = k_consts.Q
+    except:
+        # Mapping 失败时的回退 (通常不应该发生，除非 plunge)
+        Q_spec = 0.0 
+
+    # Total Q = mu^2 * Q_spec
+    Q_total = (mu**2) * Q_spec
+    sqrt_Q_total = np.sqrt(np.abs(Q_total))
+    
+    # Eq 56 RHS (without sqrt(Q) factor)
+    # Coeff = - (64/5) * (mu^2/M) * (M/p)^3.5 * sin(i) * (1-e^2)^1.5
+    factor_Q = -(64.0/5.0) * (mu**2/M) * (Mp**3.5) * sin_i * prefix
+    
+    term_Q = (
+        g[9] 
+        - q * (Mp**1.5) * cos_i * g['10b']
+        - Mp * g[11]
+        + np.pi * (Mp**1.5) * g[12]
+        - (Mp**2) * g[13]
+        + (q**2) * (Mp**2) * (g[14] - (45.0/8.0)*sin2_i)
+    )
+    
+    Q_dot_2PN = factor_Q * sqrt_Q_total * term_Q
+    
+    return E_dot_2PN, L_dot_2PN, Q_dot_2PN
+
+def nk_fluxes_gg06_2pn(p: float, e: float, iota: float, a_spin: float, M_solar: float, mu_solar: float) -> NKFluxes:
+    """
+    计算 GG06 改进版能流，包含 Circular Fix (Eq 20)。
+    """
+    # 1. 转换单位到几何单位 (Code Units M=1)
+    # 输入 p 已经是 p/M。a_spin 是 a/M。
+    # 这里的 M_solar, mu_solar 仅用于计算质量比 q_mass
+    q_mass = mu_solar / M_solar
+    M_code = 1.0
+    mu_code = q_mass * M_code # 在 M=1 单位制下，mu 就是质量比
+    
+    # 2. 计算当前轨道的 2PN Fluxes (Total Fluxes in Code Units)
+    E_dot, L_dot, Q_dot = _calc_gg06_fluxes_raw(p, e, iota, a_spin, M_code, mu_code)
+    
+    # 3. 应用 Near-Circular Correction (GG06 Sec III, Eq 20)
+    # 修正 E_dot 以满足圆轨道一致性条件
+    
+    # 计算对应的圆轨道 (e=0) 的通量
+    E_dot_circ, L_dot_circ, Q_dot_circ = _calc_gg06_fluxes_raw(p, 0.0, iota, a_spin, M_code, mu_code)
+    
+    # 计算 circular orbit 的 N 系数 (需要 Mapping 得到圆轨道的 E, L, Q)
+    try:
+        k_circ = get_conserved_quantities(M_code, a_spin, p, 0.0, iota)
+        N1, N4, N5 = _N_coeffs(p, M_code, a_spin, k_circ.E, k_circ.Lz, iota)
+        
+        # Eq 20: E_dot_mod = (1-e^2)^1.5 * [ ... ]
+        prefix = (1 - e*e)**1.5
+        
+        # 括号内的项
+        term1 = E_dot / prefix # 移除 (1-e^2)^1.5 因子
+        term2 = E_dot_circ     # 已经是 e=0
+        term3 = (N4/N1) * L_dot_circ
+        # 注意：公式里是用 Q_dot 还是 iota_dot?
+        # Eq 20 原文是用 Q_dot (Eq 20 last term: - (N5/N1) * Q_dot_circ)
+        # 我们用的是 Total Q_dot，N1/N5 是基于 Specific 量的吗？
+        # N1, N4, N5 量级：N1 ~ E*p^4 ~ p^4. N4 ~ p*L ~ p*sqrt(p) ~ p^1.5.
+        # Eq 14: N1*E_dot + N4*L_dot + N5*Q_dot = 0
+        # 这是一个齐次方程。如果我们用 Total Fluxes (E_tot ~ mu, L_tot ~ mu, Q_tot ~ mu^2)
+        # 那么各项量级：
+        # N1*E ~ p^4 * mu
+        # N4*L ~ p^1.5 * mu
+        # N5*Q ~ p * mu^2
+        # 明显量级不对！N 系数是基于 Specific quantities (e.g. D(r) Eq 10) 推导的。
+        # 所以 Eq 14 成立的前提是 E, L, Q 都是 Specific Fluxes。
+        
+        # >>> 关键单位转换 <<<
+        # 将 Total Fluxes 转为 Specific Fluxes
+        # E_spec_dot = E_tot_dot / mu
+        # L_spec_dot = L_tot_dot / mu
+        # Q_spec_dot = Q_tot_dot / mu^2
+        
+        E_spec_dot = E_dot / mu_code
+        E_spec_dot_circ = E_dot_circ / mu_code
+        L_spec_dot_circ = L_dot_circ / mu_code
+        Q_spec_dot_circ = Q_dot_circ / (mu_code**2)
+        
+        # 在 Specific 层面应用 Eq 20
+        term1_s = E_spec_dot / prefix
+        correction = E_spec_dot_circ + (N4/N1)*L_spec_dot_circ + (N5/N1)*Q_spec_dot_circ
+        
+        E_spec_dot_mod = prefix * (term1_s - correction)
+        
+        # 最终 Fluxes (Specific)
+        # 这里我们直接返回 Specific Fluxes，因为 Mapping 也是 Specific 的
+        dE_spec = E_spec_dot_mod
+        dL_spec = L_dot / mu_code
+        dQ_spec = Q_dot / (mu_code**2)
+        
+    except Exception as err:
+        # 如果 Mapping 失败 (例如 ISCO 附近)，降级为未修正通量
+        # print(f"Warning: Circular fix failed ({err}), using raw 2PN.")
+        dE_spec = E_dot / mu_code
+        dL_spec = L_dot / mu_code
+        dQ_spec = Q_dot / (mu_code**2)
+
+    # ==========================================================================
+    # 4. 坐标转换 (Jacobian): (E, L, Q) -> (p, e, iota)
+    # ==========================================================================
+    
+    # 我们需要计算 Jacobian J = d(E,L,Q)/d(p,e,iota)
+    # 然后解 J * [dp, de, diota]^T = [dE, dL, dQ]^T
+    
+    # 4.1 数值计算 Jacobian (中心差分)
+    # 步长
+    dp = 1e-4 * p
+    de_step = 1e-5 if e > 1e-4 else 1e-6
+    di = 1e-5
+    
+    # 基准点
+    k0 = get_conserved_quantities(M_code, a_spin, p, e, iota)
+    y0 = np.array([k0.E, k0.Lz, k0.Q])
+    
+    # 对 p 扰动
+    kp = get_conserved_quantities(M_code, a_spin, p+dp, e, iota)
+    km = get_conserved_quantities(M_code, a_spin, p-dp, e, iota)
+    dydp = (np.array([kp.E, kp.Lz, kp.Q]) - np.array([km.E, km.Lz, km.Q])) / (2*dp)
+    
+    # 对 e 扰动
+    ke_p = get_conserved_quantities(M_code, a_spin, p, e+de_step, iota)
+    ke_m = get_conserved_quantities(M_code, a_spin, p, e-de_step, iota)
+    dyde = (np.array([ke_p.E, ke_p.Lz, ke_p.Q]) - np.array([ke_m.E, ke_m.Lz, ke_m.Q])) / (2*de_step)
+    
+    # 对 iota 扰动
+    ki_p = get_conserved_quantities(M_code, a_spin, p, e, iota+di)
+    ki_m = get_conserved_quantities(M_code, a_spin, p, e, iota-di)
+    dydi = (np.array([ki_p.E, ki_p.Lz, ki_p.Q]) - np.array([ki_m.E, ki_m.Lz, ki_m.Q])) / (2*di)
+    
+    # 组装 Jacobian Matrix
+    # J = [[dE/dp, dE/de, dE/di],
+    #      [dL/dp, ...         ],
+    #      [dQ/dp, ...         ]]
+    J = np.column_stack((dydp, dyde, dydi))
+    
+    # 4.2 求解线性方程组
+    # Y_dot = [dE_spec, dL_spec, dQ_spec]
+    Y_dot = np.array([dE_spec, dL_spec, dQ_spec])
+    
+    # X_dot = J^-1 * Y_dot
+    try:
+        X_dot = np.linalg.solve(J, Y_dot)
+        dp_dt_val, de_dt_val, diota_dt_val = X_dot
+    except np.linalg.LinAlgError:
+        # 奇异矩阵 (例如圆轨道或极轨道极限)，回退或置零
+        dp_dt_val, de_dt_val, diota_dt_val = 0.0, 0.0, 0.0
+
+    return NKFluxes(
+        dE_dt=dE_spec, dLz_dt=dL_spec, dQ_dt=dQ_spec,
+        dp_dt=dp_dt_val, de_dt=de_dt_val, diota_dt=diota_dt_val
+    )
+
+# ... (保留 compute_numerical_fluxes, nk_fluxes_peters_ghk, compute_nk_fluxes) ...
+# 记得在 compute_nk_fluxes 中添加 scheme="gg06_2pn" 的分支调用
 def compute_nk_fluxes(p_dimless: float,
                       e: float,
                       iota: float,
@@ -408,5 +718,9 @@ def compute_nk_fluxes(p_dimless: float,
     """
     if scheme == "peters_ghk" or scheme == "PM":
         return nk_fluxes_peters_ghk(p_dimless, e, iota, M_solar, mu_solar)
+    elif scheme == "ryan_leading":
+        return nk_fluxes_ryan_leading(p_dimless, e, iota, a_spin, M_solar, mu_solar)
+    elif scheme == "gg06_2pn":
+        return nk_fluxes_gg06_2pn(p_dimless, e, iota, a_spin, M_solar, mu_solar)
     else:
         raise NotImplementedError(f"Flux scheme {scheme} not implemented yet")
