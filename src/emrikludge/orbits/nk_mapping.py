@@ -33,10 +33,12 @@ def _radial_potential_deriv(r, M, a, E, Lz, Q):
     v_minus = _radial_potential(r - eps, M, a, E, Lz, Q)
     return (v_plus - v_minus) / (2 * eps)
 try:
-    from cpp.emrikludge import get_conserved_quantities_cpp
+    from .._emrikludge import get_conserved_quantities_cpp
     USE_CPP = True
+    print("[NK Mapping] C++ extension loaded successfully. Acceleration ON 🚀")
 except ImportError:
     USE_CPP = False
+    print("[NK Mapping] C++ extension not found. Using pure Python (slow). 🐢")
 
 def get_conserved_quantities(M, a, p, e, iota)-> KerrConstants:
     if USE_CPP:
