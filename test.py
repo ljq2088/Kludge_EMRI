@@ -7,7 +7,7 @@ from src.emrikludge.waveforms.nk_waveform import compute_nk_waveform, ObserverIn
 G_SI = 6.67430e-11
 C_SI = 299792458.0
 M_SUN_SI = 1.989e30
-
+Gpc_SI=3.0856775814913674e25
 def run_test_case(case_name, M, a, p, e, iota, duration, dt):
     print(f"--- Running {case_name} ---")
     print(f"Input: M={M:.1e} M_sun, p={p} M")
@@ -20,7 +20,7 @@ def run_test_case(case_name, M, a, p, e, iota, duration, dt):
     
     # 2. 波形计算
     # 传入物理质量，底层负责转换质量比和距离
-    dist_meters = 1.0e9 * 3.086e22 # 1 Gpc
+    dist_meters = 1.0*Gpc_SI # 1 Gpc
     observer = ObserverInfo(R=dist_meters, theta=np.pi/4, phi=0.0)
     mu = 10.0 # 10 M_sun
     
