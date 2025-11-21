@@ -1,9 +1,12 @@
 // cpp/emrikludge/emri_params.hpp
 #pragma once
-#include <cmath>
 #include <vector>
+#include <cmath>
+#include <cstddef>
+#include <string>
+namespace emrikludge {
 
-// 与 Python 端 dataclass 对应的结构体
+// 1. 唯一定义 KerrConstants
 struct KerrConstants {
     double E;
     double Lz;
@@ -17,7 +20,38 @@ struct KerrConstants {
     double beta;
 };
 
-// 核心 Mapping 函数声明
-// 输入: a (无量纲自旋), p (半通径 p/M), e, iota (rad)
-// 注意: 内部计算默认 M=1 (几何单位)，因为输入的 p 已经是 p/M
-KerrConstants get_conserved_quantities_cpp(double a, double p, double e, double iota);
+// 2. EMRIParams 定义
+struct EMRIParams {
+    double M;
+    double mu;
+    double a;
+    double p0;
+    double e0;
+    double iota0;
+    double thetaS;
+    double phiS;
+    double thetaK;
+    double phiK;
+    double dist;
+    double Phi_phi0;
+    double Phi_r0;
+    double Phi_theta0;
+    double T;
+    double dt;
+    bool use_eccentric;
+    bool use_equatorial;
+
+    EMRIParams(); // 构造函数声明
+};
+
+// 3. WaveformConfig 定义
+struct WaveformConfig {
+    bool return_polarizations;
+    bool return_tdi_channels;
+    bool return_orbit;
+    std::string tdi_mode;
+
+    WaveformConfig(); // 构造函数声明
+};
+
+} // namespace emrikludge

@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 using namespace std;
-
+namespace emrikludge{
 // 构造函数
 BabakNKOrbit::BabakNKOrbit(double M, double a, double p, double e, double iota, double mu)
     : M_phys(M), a_spin(a), p0(p), e0(e), iota0(iota), mu_phys(mu) {
@@ -179,4 +179,5 @@ KerrConstants BabakNKOrbit::get_conserved_quantities(double M, double a, double 
 // 占位符：演化函数暂时返回空，我们目前只用 Mapping 加速
 std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
     return {};
+}
 }
