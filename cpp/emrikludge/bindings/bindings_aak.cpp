@@ -81,3 +81,29 @@ PYBIND11_MODULE(_aak_cpu, m) {
     m.doc() = "CPU implementation of AAK EMRI waveform (bindings)";
     bind_aak(m);
 }
+PYBIND11_MODULE(_emrikludge, m) {
+    
+    // ... (这里可能已经有 AAK 的绑定) ...
+
+    // 1. 绑定 KerrConstants 结构体
+    // 这样 Python 拿到这个对象时，可以访问 .E, .Lz 等属性
+    py::class_<KerrConstants>(m, "KerrConstants")
+        .def(py::init<>())
+        .def_readwrite("E", &KerrConstants::E)
+        .def_readwrite("Lz", &KerrConstants::Lz)
+        .def_readwrite("Q", &KerrConstants::Q)
+        .def_readwrite("r3", &KerrConstants::r3)
+        .def_readwrite("r4", &KerrConstants::r4)
+        .def_readwrite("r_p", &KerrConstants::r_p)
+        .def_readwrite("r_a", &KerrConstants::r_a)
+        .def_readwrite("z_minus", &KerrConstants::z_minus)
+        .def_readwrite("z_plus", &KerrConstants::z_plus)
+        .def_readwrite("beta", &KerrConstants::beta);
+
+    // 2. 绑定 Mapping 函数
+    // 我们将其作为模块级别的函数暴露出来
+    m.def("get_conserved_quantities_cpp", 
+          &BabakNKOrbit::get_conserved_quantities,
+          "Calculate E, Lz, Q from p, e, iota using C++ Newton-Raphson",
+          py::arg("M"), py::arg("a"), py::arg("p"), py::arg("e"), py::arg("iota"));
+}
