@@ -70,4 +70,6 @@ PYBIND11_MODULE(_emrikludge, m) {
           &BabakNKOrbit::get_conserved_quantities,
           "Calculate E, Lz, Q using C++ Newton-Raphson",
           py::arg("M"), py::arg("a"), py::arg("p"), py::arg("e"), py::arg("iota"));
+    
+    m.def("compute_gg06_fluxes_cpp", &BabakNKOrbit::compute_gg06_fluxes, ...);
 }

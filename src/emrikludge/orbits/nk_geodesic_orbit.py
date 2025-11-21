@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from .nk_mapping import get_conserved_quantities
 # 引入通量计算模块
 from .nk_fluxes import compute_nk_fluxes
-
+import time
 @dataclass
 class NKOrbitTrajectory:
     t: np.ndarray
@@ -76,14 +76,27 @@ class BabakNKOrbit:
         except Exception:
             raise StopIteration("Mapping failed (unstable orbit)")
     def _print_progress(self, t, dt=None):
-        """辅助函数：打印进度条"""
-        if t - self._last_print_t > self._print_interval:
+        """辅助函数：打印进度条 (基于真实时间 + 模拟时间)"""
+        current_wall_time = time.time()
+        
+        # 判定条件：
+        # 1. 距离上次打印超过 2 秒 (Real Time)
+        # 2. OR 距离上次打印超过 1% 的模拟进度 (Sim Time)
+        # 3. 并且避免过于频繁 (至少间隔 0.1s)
+        
+        time_since_last = current_wall_time - self._last_wall_time
+        
+        if time_since_last > 2.0 or (t - self._last_print_t > self._print_interval):
             percent = (t / self._total_duration) * 100.0
             dt_info = f" | dt ~ {dt:.2e}" if dt else ""
-            # 增加 dt 显示，方便监控是否卡死
-            sys.stdout.write(f"\r[Integrating] t = {t:.1f} / {self._total_duration:.1f} M ({percent:.1f}%){dt_info}")
+            
+            # 打印状态
+            sys.stdout.write(f"\r[Integrating] t = {t:.1f} / {self._total_duration:.1f} M ({percent:.2f}%){dt_info}")
             sys.stdout.flush()
+            
+            # 更新计数器
             self._last_print_t = t
+            self._last_wall_time = current_wall_time
 
     def _equations_of_motion(self, t, y):
         """[Geodesic] 3维 ODE 系统: [psi, chi, phi]"""
@@ -235,7 +248,8 @@ class BabakNKOrbit:
         # 初始化进度监测参数
         self._total_duration = t_duration
         self._last_print_t = 0.0
-        # 设置打印间隔：总时长的 1%，且不小于 10M
+        # ⏱️【修改】增加真实时间监测
+        self._last_wall_time = time.time()
         self._print_interval = max(10.0, t_duration / 100.0)
         
         if not self.do_inspiral:
