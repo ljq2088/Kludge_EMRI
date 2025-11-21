@@ -53,5 +53,30 @@ struct WaveformConfig {
 
     WaveformConfig(); // 构造函数声明
 };
+// =======================================================
+// 🛡️ AAK 占位符定义 (Placeholder Definitions)
+// 为了让 AAK 模块能通过编译，先定义空结构体。
+// 后续实现 AAK 时再完善或移到独立文件中。
+// =======================================================
 
+struct AAKOrbitTrajectory {
+    // 暂时留空，或者是加一些占位成员防止 unused warning
+    int _placeholder; 
+};
+
+struct LISAOrbit {
+    int _placeholder;
+};
+
+struct LISAResponse {
+    int _placeholder;
+};
+
+// 简单的 AAK 返回结果结构体 (如果之前没定义的话)
+struct AAKWaveformResult {
+    std::vector<double> t;
+    std::vector<double> hplus;
+    std::vector<double> hcross;
+    // 还有 X, Y, Z 等 TDI 通道
+};
 } // namespace emrikludge
