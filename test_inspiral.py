@@ -8,7 +8,11 @@ from src.emrikludge.orbits.nk_mapping import get_conserved_quantities
 # ==============================================================================
 # 用户配置区域 (User Configuration)
 # ==============================================================================
-
+# 物理常数 (SI)
+G_SI = 6.67430e-11
+C_SI = 299792458.0
+M_SUN_SI = 1.989e30
+SEC_PER_YEAR = 31536000.0
 # 1. 物理系统参数
 M_BH_SOLAR = 1e6        # 主黑洞质量 [太阳质量]
 mu_OBJ_SOLAR = 10.0     # 小天体质量 [太阳质量]
@@ -30,21 +34,20 @@ SIMULATION_MODE = 'short'
 
 # 'short' 模式设置
 SHORT_DURATION_SEC = 20000.0  # 物理时间 [秒] (约 5.5 小时)
-SHORT_DT_M = 1.0              # 输出采样步长 [M]
+SHORT_DT=1.0                  # 输出采样步长 [秒]
+#转换成单位为M
+SHORT_DT_M=SHORT_DT * C_SI**3 /(G_SI * M_BH_SOLAR * M_SUN_SI)  # 将秒转换为 M 单位
 
 # 'long' 模式设置
 LONG_DURATION_YEARS = 1.0     # 物理时间 [年]
-LONG_DT_M = 100.0             # 输出采样步长 [M] (长时演化可以稀疏一点，只看包络)
-
+LONG_DT=10.0                  # 输出采样步长 [秒]
+#转换成单位为M
+LONG_DT_M=SHORT_DT * C_SI**3 /(G_SI * M_BH_SOLAR * M_SUN_SI)  # 将秒转换为 M 单位
 # ==============================================================================
 # 内部计算逻辑 (无需频繁修改)
 # ==============================================================================
 
-# 物理常数 (SI)
-G_SI = 6.67430e-11
-C_SI = 299792458.0
-M_SUN_SI = 1.989e30
-SEC_PER_YEAR = 31536000.0
+
 
 def run_simulation():
     print(f"=== EMRI NK Simulation (Mode: {SIMULATION_MODE}) ===")

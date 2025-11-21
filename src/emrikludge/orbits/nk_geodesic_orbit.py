@@ -376,14 +376,17 @@ class BabakNKOrbit:
             # 简单的 ISCO 停止条件
             return p - 3.0 
         plunge_event.terminal = True
-        
+        def unbound_event_e(t, y):
+            e = y[1]
+            return 0.999 - e  # 当 e > 0.999 时停止 (即值 < 0 时触发)
+        unbound_event_e.terminal = True
         # 稍微放宽精度以提高 Inspiral 速度
         sol = solve_ivp(
             self._equations_of_motion_inspiral, 
             t_span, y0, 
             method='RK45', 
             rtol=1e-7, atol=1e-7,
-            events=plunge_event,
+            events=[plunge_event, unbound_event_e],
             dense_output=True
         )
         

@@ -489,15 +489,20 @@ def _calc_gg06_fluxes_raw(p: float, e: float, iota: float, a: float, M: float, m
     v2 = M / p
     v = np.sqrt(v2)
     Mp = v2 # (M/p)
-    
+    safe_e = e
+    if e >= 1.0:
+        # 策略 A: 强制钳位到接近 1 (例如 0.999) 继续算 (不推荐，物理上不正确)
+        # 策略 B: 认为已经 Plunge，通量设为 0 或其他标记值
+        # 这里为了不报错，我们暂时钳位，但最好是在积分器里停止
+        safe_e = 0.999
     # 角度函数
     cos_i = np.cos(iota)
     sin_i = np.sin(iota)
     sin2_i = sin_i**2
     cos2_i = cos_i**2
     
-    g = _g_coeffs(e)
-    prefix = (1 - e*e)**1.5
+    g = _g_coeffs(safe_e)
+    prefix = (1 - safe_e*safe_e)**1.5
     
     # --- Energy Flux (Eq 44) ---
     # E_dot_2PN / factor
@@ -545,7 +550,7 @@ def _calc_gg06_fluxes_raw(p: float, e: float, iota: float, a: float, M: float, m
     
     # 为了计算方便，我们先算出 Specific Q，再转为 Total Q
     try:
-        k_consts = get_conserved_quantities(M, a, p, e, iota)
+        k_consts = get_conserved_quantities(M, a, p, safe_e, iota)
         Q_spec = k_consts.Q
     except:
         # Mapping 失败时的回退 (通常不应该发生，除非 plunge)
