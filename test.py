@@ -73,6 +73,7 @@ def run_test_case(case_name, M, a, p, e, iota, duration, dt):
     
     plt.tight_layout()
     plt.show()
+    plt.savefig(f"{case_name}.png", bbox_inches='tight')
 
 if __name__ == "__main__":
     # 设置黑洞参数
