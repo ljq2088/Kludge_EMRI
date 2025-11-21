@@ -30,7 +30,7 @@ PHI_OBS_DEG = 0.0       # 观测者方位角 [度]
 
 # 4. 模拟控制
 # 模式选择: 'short' (用于调试波形) 或 'long' (用于看长期演化)
-SIMULATION_MODE = 'short' 
+SIMULATION_MODE = 'long' 
 
 # 'short' 模式设置
 SHORT_DURATION_SEC = 20000.0  # 物理时间 [秒] (约 5.5 小时)

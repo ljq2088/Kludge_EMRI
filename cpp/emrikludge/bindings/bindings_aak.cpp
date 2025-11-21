@@ -35,15 +35,19 @@ PYBIND11_MODULE(_emrikludge, m) {
         .def_readwrite("return_polarizations", &WaveformConfig::return_polarizations)
         .def_readwrite("return_orbit", &WaveformConfig::return_orbit);
 
-    // 绑定 KerrConstants (现在它是唯一的了)
+    // 绑定 KerrConstants
     py::class_<KerrConstants>(m, "KerrConstants")
         .def(py::init<>())
         .def_readwrite("E", &KerrConstants::E)
         .def_readwrite("Lz", &KerrConstants::Lz)
         .def_readwrite("Q", &KerrConstants::Q)
+        .def_readwrite("r3", &KerrConstants::r3)
+        .def_readwrite("r4", &KerrConstants::r4)
         .def_readwrite("r_p", &KerrConstants::r_p)
         .def_readwrite("r_a", &KerrConstants::r_a)
-        .def_readwrite("z_minus", &KerrConstants::z_minus);
+        .def_readwrite("z_minus", &KerrConstants::z_minus)
+        .def_readwrite("z_plus", &KerrConstants::z_plus)
+        .def_readwrite("beta", &KerrConstants::beta);
 
     // -------------------------------------------------------
     // 2. AAK 模块绑定

@@ -288,7 +288,15 @@ def nk_fluxes_gg06_2pn(p: float, e: float, iota: float, a_spin: float, M_solar: 
     
     try:
         k_circ = get_conserved_quantities(M_code, a_spin, p, 0.0, iota)
+        if k_circ.E == 0.0:
+            raise ValueError("C++ Mapping failed (returned zeros)")
+
         N1, N4, N5 = _N_coeffs(p, M_code, a_spin, k_circ.E, k_circ.Lz, iota)
+        
+        # 如果 N1 太小，也会导致除零，最好也检查一下
+        if abs(N1) < 1e-12:
+            raise ValueError("N1 coefficient too close to zero")
+        # N1, N4, N5 = _N_coeffs(p, M_code, a_spin, k_circ.E, k_circ.Lz, iota)
         
         # 🛡️【修正】使用 safe_e 计算 prefix
         prefix = (1.0 - safe_e*safe_e)**1.5

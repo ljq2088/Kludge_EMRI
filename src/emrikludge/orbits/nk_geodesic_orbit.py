@@ -75,12 +75,13 @@ class BabakNKOrbit:
             return k
         except Exception:
             raise StopIteration("Mapping failed (unstable orbit)")
-    def _print_progress(self, t):
+    def _print_progress(self, t, dt=None):
         """辅助函数：打印进度条"""
         if t - self._last_print_t > self._print_interval:
             percent = (t / self._total_duration) * 100.0
-            # \r 回车不换行，覆盖上一行输出
-            sys.stdout.write(f"\r[Integrating] t = {t:.1f} / {self._total_duration:.1f} M ({percent:.1f}%)")
+            dt_info = f" | dt ~ {dt:.2e}" if dt else ""
+            # 增加 dt 显示，方便监控是否卡死
+            sys.stdout.write(f"\r[Integrating] t = {t:.1f} / {self._total_duration:.1f} M ({percent:.1f}%){dt_info}")
             sys.stdout.flush()
             self._last_print_t = t
 
@@ -152,7 +153,20 @@ class BabakNKOrbit:
         if current_dt > 0:
              self._print_progress(t) # 需要修改 _print_progress 接收 dt
         p, e, iota, psi, chi, phi = y
-        
+        try:
+            k = self._get_constants_fast(p, e, iota)
+            
+            # 🚨 检查 C++ 是否返回了失败信号 (E=0)
+            if k.E == 0.0:
+                # 主动抛出异常，打断积分器
+                raise StopIteration(f"Mapping failed (E=0) at p={p:.4f}, e={e:.4f}")
+                
+        except StopIteration:
+            # 返回全 0 导数会让积分器停滞，不如直接报错退出或者返回极大值让它缩小步长
+            # 但如果是 mapping 失败，通常意味着轨道崩了，直接停比较好
+            # 为了让 solve_ivp 优雅退出，通常比较麻烦
+            # 这里我们返回一个全 0，但希望外层的 event 能捕捉到
+            return np.zeros(6)
         # 1. 获取当前的动力学常数 (E, Lz, Q)
         try:
             k = self._get_constants_fast(p, e, iota)

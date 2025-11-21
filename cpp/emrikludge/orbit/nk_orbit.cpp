@@ -31,17 +31,21 @@ double BabakNKOrbit::radial_potential_deriv(double r, double M, double a, double
 // --- 核心 Mapping 函数 ---
 KerrConstants BabakNKOrbit::get_conserved_quantities(double M, double a, double p, double e, double iota) {
     // 1. 准备变量
-    // 强制 M=1 (几何单位)
     double M_code = 1.0; 
-    // 输入的 p 假设已经是 p/M
-    
     double r_p = p / (1.0 + e);
     double r_a = p / (1.0 - e);
     
-    // 初始猜测 (Weak Field Approximation)
-    double E = 0.93;
-    double Lz = sqrt(p) * cos(iota);
-    double Q = p * pow(sin(iota), 2);
+    // 🛡️【改进】使用 Schwarzschild 圆轨道公式作为初始猜测
+    // E_schw = sqrt((r-2)/r) 对于 e=0. 对于一般轨道，用 p 的有效势估计。
+    // 这里使用简单的 Schwarzschild 能量公式作为起点，比 0.93 强得多。
+    double num = p - 2.0 - 2.0*e;
+    if (num < 0.1) num = 0.1; // 保护
+    double den = p * (1.0 + e);
+    double E_guess = sqrt(num / den);
+    
+    double E = E_guess;
+    double Lz = sqrt(p*M_code) * cos(iota);
+    double Q = p*M_code * pow(sin(iota), 2);
     
     // Newton-Raphson 迭代配置
     const int MAX_ITER = 100;
