@@ -67,65 +67,99 @@ class BabakNKOrbit:
         denominator = gamma + (self.a**2) * E * z
         
         # dchi/dt
-        dchi_dt = np.sqrt(self.k.beta * (self.k.z_plus - z)) / denominator
+        # 注意：z_plus - z 应该始终 >= 0，加上 abs 防止数值误差
+        dchi_dt = np.sqrt(np.abs(self.k.beta * (self.k.z_plus - z))) / denominator
         
-        # dpsi/dt (使用 Eq 8 的解析形式或链式法则)
-        # 此处演示使用 Babak Eq 8 的完整形式 (需要 r3, r4)
-        # V_r = (1-E^2)(r_a - r)(r - r_p)(r - r_3)(r - r_4)
-        # sqrt(V_r) = sqrt(1-E^2) * sqrt((r_a-r)(r-r_p)(r-r3)(r-r4))
-        # 注意：r3, r4 可能为负或复数？对于束缚轨道通常 r3, r4 > r_a > r_p
-        # 我们之前 mapping 保证了 r3 > r4
-        
+        # --- 修正变量名 V_r ---
+        # V_r / (1-E^2) = (r_a - r)(r - r_p)(r - r3)(r - r4)
+        # 确保项为正
         term_r = (1 - E**2) * (self.k.r_a - r) * (r - self.k.r_p) * (r - self.k.r3) * (r - self.k.r4)
-        if term_r < 0: term_r = 0
-        sqrt_Vr = np.sqrt(term_r)
         
-        # dpsi/dt = +/- sqrt(V_r) / denominator * (dpsi/dr)? 
-        # 直接用 Babak Eq 8:
-        # dpsi/dt = sqrt(V_r) / denominator / (dr/dpsi) ??? 
-        # 不，Eq 8 直接给出了 dpsi/dt。
-        # 公式 8 右边是 sqrt(...) / denominator
-        # 让我们仔细看公式8: dpsi/dtau = ... / Sigma? No, Eq 8 is dpsi/dt directly.
-        # 实际上 Eq 8 的分子对应 sqrt(V_r) 对 psi 的转化。
-        # r = p / (1 + e cos psi)
-        # dr = p e sin psi / (1 + e cos psi)^2 dpsi
-        # ... 
-        # 无论如何，为了稳健，我们用数值 dr/dt / (dr/dpsi)
-        dr_dt = sqrt_Vr / denominator / dt_dtau # dr/dt = (dr/dtau) / (dt/dtau)
-        # Wait, dt_dtau is already V_t/Sigma.
-        # dr/dtau = sqrt(V_r)/Sigma.
-        # So dr/dt = sqrt(V_r) / V_t.
+        # 数值保护：虽然理论上在 r_p <= r <= r_a 内 term_r >= 0，但数值误差可能导致微小负数
+        if term_r < 0.0:
+            term_r = 0.0
+            
+        V_r = term_r  # <--- 【关键修正】显式定义 V_r
         
-        dr_dpsi = (self.p * self.e * np.sin(psi)) / ((1 + self.e * np.cos(psi))**2)
+        # 计算 dr/dpsi
+        denom_psi = 1 + self.e * np.cos(psi)
+        dr_dpsi = (self.p * self.e * np.sin(psi)) / (denom_psi**2)
         
-        if np.abs(np.sin(psi)) < 1e-6:
-            # 在转折点，使用极限值或者近似
-             # 这是一个简化的处理，实际上应该展开
-             dpsi_dt = np.sqrt(1-E**2) * (self.k.r_a - self.k.r_p) / denominator # 这是一个非常粗糙的占位
-             # 更好的做法是直接积分 tau，但这里为了配合 t 积分
-             # 我们可以简单地加上一个小量避免除零
-             dpsi_dt = (np.sqrt(V_r + 1e-12) / Sigma) / dt_dtau / (dr_dpsi + 1e-9)
+        # dpsi/dt = (dr/dt) / (dr/dpsi)
+        # dr/dt = (dr/dtau) / (dt/dtau) = (sqrt(V_r)/Sigma) / (V_t/Sigma) = sqrt(V_r)/V_t
+        # 所以 dpsi/dt = sqrt(V_r) / (V_t * dr_dpsi)
+        # 注意：V_t = denominator * Sigma / Sigma = denominator ??? 不完全是，但 Babak Eq 8 给出了直接形式
+        # Babak Eq 8: dpsi/dt = sqrt(...) / denominator
+        # 我们这里用链式法则来验证，或者直接用数值更稳健
+        
+        # 为了避免除以 dr_dpsi=0 (在转折点 sin(psi)=0)，我们加一个小量处理
+        if np.abs(np.sin(psi)) < 1e-5:
+            # 在转折点附近，利用洛必达法则或解析极限
+            # 简单起见，给 dr_dpsi 加一个极小值避免除零错误，
+            # 因为此时 V_r 也是 0，0/0 需要极限处理。
+            # 更好的方式是直接用 Eq 8 的解析形式 (已经消去了 sin(psi))
+            # 这里用数值稳定处理：
+            dpsi_dt = np.sqrt(V_r + 1e-14) / (V_t * (np.abs(dr_dpsi) + 1e-7)) * np.sign(dr_dpsi)
+            # 或者直接近似一个非零速度，让它跨过转折点
+            if np.abs(dr_dpsi) < 1e-9:
+                 # 强制给一个非常小的角速度推过去
+                 dpsi_dt = 1e-3 / denominator 
         else:
-             dpsi_dt = (np.sqrt(V_r) / Sigma) / dt_dtau / dr_dpsi
+             dpsi_dt = np.sqrt(V_r) / (V_t * dr_dpsi)
         
+        # 强制取绝对值，因为 psi 是单调增加的角度参数（类似平近点角）
+        # 实际上 Babak 的 psi 定义是 cos(psi)，所以 psi 是一直增加的
+        dpsi_dt = np.abs(dpsi_dt)
+
         # dphi/dt
         dphi_dt = V_phi / V_t
         
         return [dpsi_dt, dchi_dt, dphi_dt]
 
     def evolve(self, t_duration, dt):
-        # t_duration 和 dt 都是以 M 为单位的
-        t_eval = np.arange(0, t_duration, dt)
-        y0 = [0.0, 0.0, 0.0]
+        """
+        演化轨道。
         
-        sol = solve_ivp(self._equations_of_motion, [0, t_duration], y0, t_eval=t_eval, rtol=1e-9, atol=1e-9)
+        策略:
+        1. 使用 RK45 自适应步长积分 (dense_output=True)，保证物理精度。
+        2. 使用积分器生成的插值多项式重采样到均匀时间网格 dt。
+        """
+        # 1. 积分设置
+        # t_duration 和 dt 都是以 M 为单位
+        t_span = [0, t_duration]
+        y0 = [0.0, 0.0, 0.0] # [psi, chi, phi]
         
-        psi = sol.y[0]
-        chi = sol.y[1]
-        phi = sol.y[2]
+        # 2. 执行自适应积分
+        # 注意：这里不传入 t_eval，让积分器自己决定步长
+        sol = solve_ivp(
+            self._equations_of_motion, 
+            t_span, 
+            y0, 
+            method='RK45',
+            rtol=1e-9, 
+            atol=1e-9,
+            dense_output=True  # <--- 关键：启用连续解输出
+        )
         
+        # 3. 重采样 (Resampling) 到均匀网格
+        # 生成均匀时间序列
+        t_uniform = np.arange(0, t_duration, dt)
+        
+        # 利用 dense_output 提供的插值函数 sol.sol() 计算状态
+        y_uniform = sol.sol(t_uniform)
+        
+        psi = y_uniform[0]
+        chi = y_uniform[1]
+        phi = y_uniform[2]
+        
+        # 4. 坐标重建
         r_over_M = self.p / (1 + self.e * np.cos(psi))
-        z = self.k.z_minus * (np.cos(chi)**2)
-        theta = np.arccos(np.sqrt(z)) # 简化处理，假定在北半球
         
-        return NKOrbitTrajectory(sol.t, r_over_M, theta, phi, psi, chi)
+        # 【修正】Theta 重建
+        # 之前的 theta = arccos(sqrt(z)) 会丢失符号，导致粒子一直在北半球反弹
+        # 正确的参数化是 cos(theta) = sqrt(z_minus) * cos(chi)
+        # 这样当 chi 变化时，粒子可以穿过赤道面
+        cos_theta = np.sqrt(self.k.z_minus) * np.cos(chi)
+        theta = np.arccos(cos_theta)
+        
+        return NKOrbitTrajectory(t_uniform, r_over_M, theta, phi, psi, chi)

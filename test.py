@@ -29,8 +29,10 @@ def run_test_case(case_name, M, a, p, e, iota, duration, dt):
     # 3. 绘图 (转换时间轴到秒)
     M_sec = G_SI * (M * M_SUN_SI) / C_SI**3
     t_sec = traj.t * M_sec
-    
+    start=100
+    end=1500
     plt.figure(figsize=(10, 4))
+    #plt.plot(t_sec[start:end], h_plus[start:end])
     plt.plot(t_sec, h_plus)
     plt.title(f"{case_name}: h+ (M={M:.0e})")
     plt.xlabel("Time (s)")
