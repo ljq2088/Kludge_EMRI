@@ -113,7 +113,7 @@ KerrConstants BabakNKOrbit::get_conserved_quantities(double M, double a, double 
     }
     // 2. Newton-Raphson 迭代
     const int MAX_ITER = 100;
-    const double TOL = 1e-10;
+    const double TOL = 1e-8;
     bool success = false;
     double resid_norm = 0.0;
 

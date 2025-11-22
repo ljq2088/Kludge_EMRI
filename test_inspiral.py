@@ -102,7 +102,7 @@ def run_inspiral_demo():
     # 演化时间 (以 M 为单位)。
     # 1 M_sun 的 M 约为 4.92e-6 秒。
     # 1e6 M_sun 的 1 M 约为 4.92 秒。
-    T=1.0# 1年
+    T=4.0# 年
     duration_M=T*365.0*24.0*3600.0 / (G_SI * (M_phys * M_SUN_SI) / (C_SI**3))
     dt=10.0 #10秒
     dt_M = dt* (C_SI**3) /(G_SI * (M_phys * M_SUN_SI))
