@@ -3,7 +3,8 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
-
+//定义常数PI
+const double PI = 3.14159265358979323846;
 using namespace std;
 // ---------------------------------------------------------
 // 辅助函数：GG06 Flux Coefficients
@@ -246,7 +247,6 @@ KerrConstants BabakNKOrbit::get_conserved_quantities(double M, double a, double 
     return {E, Lz, Q, r3, r4, r_p, r_a, z_minus, z_plus, beta};
 }
 // 在 BabakNKOrbit 类方法的实现区域
-
 NKFluxes BabakNKOrbit::compute_gg06_fluxes(double p, double e, double iota, double a, double M, double mu) {
     NKFluxes flux = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     
@@ -448,8 +448,137 @@ NKFluxes BabakNKOrbit::compute_gg06_fluxes(double p, double e, double iota, doub
     
     return flux;
 }
-// 占位符：演化函数暂时返回空，我们目前只用 Mapping 加速
 std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
-    return {};
+    std::vector<OrbitState> traj;
+    
+    // 预估步数并分配内存 (避免动态扩容开销)
+    size_t estimated_steps = static_cast<size_t>(duration / dt);
+    traj.reserve(estimated_steps + 1000);
+    
+    // 初始状态
+    double t = 0.0;
+    double p = p0;
+    double e = e0;
+    double iota = iota0;
+    double psi = 0.0;
+    double chi = 0.0;
+    double phi = 0.0;
+    
+    // 状态向量数组 y[6] = {p, e, iota, psi, chi, phi}
+    
+    // 积分循环
+    while (t < duration) {
+        // 1. 记录当前点 (Output)
+        //    计算辅助坐标 r, theta
+        KerrConstants k = get_conserved_quantities(1.0, a_spin, p, e, iota);
+        // 如果 Mapping 失败 (返回全0)，则停止演化
+        if (k.E == 0.0) break;
+
+        double r_val = p / (1.0 + e * cos(psi));
+        double z_val = k.z_minus * pow(cos(chi), 2);
+        double theta_val = acos(sqrt(max(0.0, z_val))); // 简单处理符号
+
+        traj.push_back({t, p, e, iota, psi, chi, phi, r_val, theta_val});
+        
+        // 2. 检查终止条件 (Plunge)
+        if (p < 3.0 || e >= 0.999) break;
+
+        // 3. RK4 积分步
+        // 定义导数计算 lambda (RHS)
+        auto get_derivs = [&](double cp, double ce, double ci, double cpsi, double cchi, double cphi) -> std::array<double, 6> {
+            // A. 计算 Flux (轨道参数导数)
+            double dp_dt=0, de_dt=0, diota_dt=0;
+            if (do_inspiral) {
+                NKFluxes f = compute_gg06_fluxes(cp, ce, ci, a_spin, 1.0, mu_phys);
+                dp_dt = f.dp_dt;
+                de_dt = f.de_dt;
+                diota_dt = f.diota_dt;
+            }
+            
+            // B. 计算 Geodesic (相位导数)
+            KerrConstants ck = get_conserved_quantities(1.0, a_spin, cp, ce, ci);
+            if (ck.E == 0.0) return {0,0,0,0,0,0}; // 失败保护
+
+            // ... (这里复用 Python _equations_of_motion 的公式) ...
+            // 为了简洁且避免重复代码，这里写出核心公式：
+            
+            double r = cp / (1.0 + ce * cos(cpsi));
+            double z = ck.z_minus * pow(cos(cchi), 2);
+            double Delta = r*r - 2.0*r + a_spin*a_spin; // M=1
+            double Sigma = r*r + a_spin*a_spin * z;
+            
+            // V_phi
+            double sin2theta = 1.0 - z;
+            double term1 = ck.Lz / sin2theta;
+            double term2 = a_spin * ck.E;
+            double term3 = (a_spin / Delta) * (ck.E * (r*r + a_spin*a_spin) - ck.Lz * a_spin);
+            double V_phi = term1 - term2 + term3;
+            
+            // V_t
+            double term1_t = a_spin * (ck.Lz - a_spin * ck.E * sin2theta);
+            double term2_t = ((r*r + a_spin*a_spin) / Delta) * (ck.E * (r*r + a_spin*a_spin) - ck.Lz * a_spin);
+            double V_t = term1_t + term2_t;
+            
+            // dchi/dt
+            double gamma = ck.E * (pow(r*r + a_spin*a_spin, 2)/Delta - a_spin*a_spin) 
+                           - (2.0 * r * a_spin * ck.Lz) / Delta;
+            double denominator = gamma + a_spin*a_spin * ck.E * z;
+            double dchi_dt = sqrt(abs(ck.beta * (ck.z_plus - z))) / denominator;
+            
+            // dpsi/dt
+            double term_r = (1.0 - ck.E*ck.E) * (ck.r_a - r) * (r - ck.r_p) * (r - ck.r3) * (r - ck.r4);
+            double V_r = max(0.0, term_r);
+            double denom_psi = 1.0 + ce * cos(cpsi);
+            double dr_dpsi = (cp * ce * sin(cpsi)) / (denom_psi*denom_psi);
+            
+            double dpsi_dt = 0.0;
+            if (abs(sin(cpsi)) < 1e-5) {
+                 // 简单处理转折点，避免除零
+                 dpsi_dt = sqrt(V_r + 1e-14) / (V_t * (abs(dr_dpsi) + 1e-7)); 
+                 if (dr_dpsi < 0) dpsi_dt = -dpsi_dt; // 简单的符号处理，实际应更严谨
+                 // 更简单的: 给一个非零的推力
+                 if (abs(dr_dpsi) < 1e-9) dpsi_dt = 1e-3; 
+            } else {
+                 dpsi_dt = sqrt(V_r) / (V_t * abs(dr_dpsi)); // 注意符号
+                 // 因为我们在 ODE 里积分 psi，psi 应该是单调增加的 (如平近点角) 
+                 // 或者如果是几何角度，它会震荡。
+                 // NK 方法通常积分的是一个单调递增的相角 psi，然后 r = p/(1+e cos psi)
+                 // 所以 dpsi/dt 应该始终为正
+            }
+            dpsi_dt = abs(dpsi_dt);
+            
+            double dphi_dt = V_phi / V_t;
+            
+            return {dp_dt, de_dt, diota_dt, dpsi_dt, dchi_dt, dphi_dt};
+        };
+        
+        // RK4 Step
+        auto k1 = get_derivs(p, e, iota, psi, chi, phi);
+        
+        auto k2 = get_derivs(p + 0.5*dt*k1[0], e + 0.5*dt*k1[1], iota + 0.5*dt*k1[2], 
+                             psi + 0.5*dt*k1[3], chi + 0.5*dt*k1[4], phi + 0.5*dt*k1[5]);
+                             
+        auto k3 = get_derivs(p + 0.5*dt*k2[0], e + 0.5*dt*k2[1], iota + 0.5*dt*k2[2], 
+                             psi + 0.5*dt*k2[3], chi + 0.5*dt*k2[4], phi + 0.5*dt*k2[5]);
+                             
+        auto k4 = get_derivs(p + dt*k3[0], e + dt*k3[1], iota + dt*k3[2], 
+                             psi + dt*k3[3], chi + dt*k3[4], phi + dt*k3[5]);
+
+        // Update
+        p    += (dt/6.0) * (k1[0] + 2*k2[0] + 2*k3[0] + k4[0]);
+        e    += (dt/6.0) * (k1[1] + 2*k2[1] + 2*k3[1] + k4[1]);
+        iota += (dt/6.0) * (k1[2] + 2*k2[2] + 2*k3[2] + k4[2]);
+        psi  += (dt/6.0) * (k1[3] + 2*k2[3] + 2*k3[3] + k4[3]);
+        chi  += (dt/6.0) * (k1[4] + 2*k2[4] + 2*k3[4] + k4[4]);
+        phi  += (dt/6.0) * (k1[5] + 2*k2[5] + 2*k3[5] + k4[5]);
+        
+        t += dt;
+    }
+    
+    return traj;
 }
+// // 占位符：演化函数暂时返回空，我们目前只用 Mapping 加速
+// std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
+//     return {};
+// }
 }

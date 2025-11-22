@@ -34,7 +34,28 @@ PYBIND11_MODULE(_emrikludge, m) {
         .def(py::init<>())
         .def_readwrite("return_polarizations", &WaveformConfig::return_polarizations)
         .def_readwrite("return_orbit", &WaveformConfig::return_orbit);
-
+    // 绑定 NKFluxes 结构体
+    py::class_<NKFluxes>(m, "NKFluxes")
+        .def(py::init<>())
+        .def_readwrite("dE_dt", &NKFluxes::dE_dt)
+        .def_readwrite("dLz_dt", &NKFluxes::dLz_dt)
+        .def_readwrite("dQ_dt", &NKFluxes::dQ_dt)
+        .def_readwrite("dp_dt", &NKFluxes::dp_dt)
+        .def_readwrite("de_dt", &NKFluxes::de_dt)
+        .def_readwrite("diota_dt", &NKFluxes::diota_dt);
+        
+    // 绑定 OrbitState 结构体 
+    // 这样 C++ 返回的 vector<OrbitState> 才能被 Python 识别为对象列表
+    py::class_<OrbitState>(m, "OrbitState")
+        .def_readonly("t", &OrbitState::t)
+        .def_readonly("p", &OrbitState::p)
+        .def_readonly("e", &OrbitState::e)
+        .def_readonly("iota", &OrbitState::iota)
+        .def_readonly("r", &OrbitState::r)
+        .def_readonly("theta", &OrbitState::theta)
+        .def_readonly("phi", &OrbitState::phi)
+        .def_readonly("psi", &OrbitState::psi)
+        .def_readonly("chi", &OrbitState::chi);
     // 绑定 KerrConstants
     py::class_<KerrConstants>(m, "KerrConstants")
         .def(py::init<>())
@@ -48,6 +69,16 @@ PYBIND11_MODULE(_emrikludge, m) {
         .def_readwrite("z_minus", &KerrConstants::z_minus)
         .def_readwrite("z_plus", &KerrConstants::z_plus)
         .def_readwrite("beta", &KerrConstants::beta);
+    // 绑定 BabakNKOrbit 类及其方法
+    // 注意：evolve 是成员函数，compute_gg06_fluxes 是静态函数
+    py::class_<BabakNKOrbit>(m, "BabakNKOrbit_CPP")
+        .def(py::init<double, double, double, double, double, double>(),
+                py::arg("M"), py::arg("a"), py::arg("p"), py::arg("e"), py::arg("iota"), py::arg("mu"))
+        .def("evolve", &BabakNKOrbit::evolve, 
+                "Run full evolution in C++ (Fast RK4)",
+                py::arg("duration"), py::arg("dt"))
+        .def_static("get_conserved_quantities", &BabakNKOrbit::get_conserved_quantities)
+        .def("compute_gg06_fluxes", &BabakNKOrbit::compute_gg06_fluxes);
 
     // -------------------------------------------------------
     // 2. AAK 模块绑定
@@ -71,5 +102,5 @@ PYBIND11_MODULE(_emrikludge, m) {
           "Calculate E, Lz, Q using C++ Newton-Raphson",
           py::arg("M"), py::arg("a"), py::arg("p"), py::arg("e"), py::arg("iota"));
     
-    m.def("compute_gg06_fluxes_cpp", &BabakNKOrbit::compute_gg06_fluxes, ...);
+    
 }

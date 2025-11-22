@@ -8,7 +8,14 @@
 #include "../emri_params.hpp"
 
 namespace emrikludge {
-
+struct NKFluxes {
+        double dE_dt;
+        double dLz_dt;
+        double dQ_dt;
+        double dp_dt;
+        double de_dt;
+        double diota_dt;
+    };
 // 简单的状态结构体 (仅在 Orbit 内部使用，也可以移到 emri_params)
 struct OrbitState {
     double t;
@@ -28,7 +35,7 @@ public:
     
     // 使用 emrikludge::KerrConstants
     static KerrConstants get_conserved_quantities(double M, double a, double p, double e, double iota);
-
+    NKFluxes compute_gg06_fluxes(double p, double e, double iota, double a, double M, double mu);
     std::vector<OrbitState> evolve(double duration, double dt);
 
 private:

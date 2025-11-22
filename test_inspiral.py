@@ -4,7 +4,47 @@ import time
 from src.emrikludge.orbits.nk_geodesic_orbit import BabakNKOrbit
 from src.emrikludge.waveforms.nk_waveform import compute_nk_waveform, ObserverInfo
 from src.emrikludge.orbits.nk_mapping import get_conserved_quantities
-
+from dataclasses import dataclass
+try:
+    from src.emrikludge._emrikludge import BabakNKOrbit_CPP
+    CPP_AVAILABLE = True
+except ImportError:
+    CPP_AVAILABLE = False
+    print("⚠️ Warning: C++ extension not found. Acceleration unavailable.")
+@dataclass
+class CppTrajectoryAdapter:
+    """
+    适配器：将 C++ 返回的 list[OrbitState] 转换为 
+    Python 脚本期望的包含 numpy array 的对象。
+    """
+    t: np.ndarray
+    p: np.ndarray
+    e: np.ndarray
+    iota: np.ndarray
+    r_over_M: np.ndarray
+    theta: np.ndarray
+    phi: np.ndarray
+    psi: np.ndarray
+    chi: np.ndarray
+    
+    @property
+    def r(self):
+        return self.r_over_M
+def convert_cpp_results(cpp_states):
+    """将 C++ vector 转换为 numpy 数组"""
+    # 利用 list comprehension 快速解包
+    # 注意：OrbitState 的字段名必须与 bindings_aak.cpp 中绑定的一致
+    return CppTrajectoryAdapter(
+        t=np.array([s.t for s in cpp_states]),
+        p=np.array([s.p for s in cpp_states]),
+        e=np.array([s.e for s in cpp_states]),
+        iota=np.array([s.iota for s in cpp_states]),
+        r_over_M=np.array([s.r for s in cpp_states]),
+        theta=np.array([s.theta for s in cpp_states]),
+        phi=np.array([s.phi for s in cpp_states]),
+        psi=np.array([s.psi for s in cpp_states]),
+        chi=np.array([s.chi for s in cpp_states])
+    )
 # ==============================================================================
 # 用户配置区域 (User Configuration)
 # ==============================================================================
