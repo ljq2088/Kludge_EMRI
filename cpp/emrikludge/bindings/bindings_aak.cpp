@@ -99,8 +99,9 @@ PYBIND11_MODULE(_emrikludge, m) {
     // -------------------------------------------------------
     m.def("get_conserved_quantities_cpp", 
           &BabakNKOrbit::get_conserved_quantities,
-          "Calculate E, Lz, Q using C++ Newton-Raphson",
-          py::arg("M"), py::arg("a"), py::arg("p"), py::arg("e"), py::arg("iota"));
+          "Calculate E, Lz, Q with Warm Start",
+          py::arg("M"), py::arg("a"), py::arg("p"), py::arg("e"), py::arg("iota"),
+          py::arg("E_g") = 0.0, py::arg("L_g") = 0.0, py::arg("Q_g") = 0.0);
     
     
 }

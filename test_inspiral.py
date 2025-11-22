@@ -184,7 +184,7 @@ def run_inspiral_demo():
     ax1.plot(t_sec, traj.p, color=color, label=r'$p(t)$')
     ax1.tick_params(axis='y', labelcolor=color)
     ax1.grid(True, alpha=0.3)
-    ax1.set_title(f"EMRI Inspiral Evolution ($M=10^6 M_\odot, \mu=10 M_\odot, a={a_spin}$)")
+    ax1.set_title(rf"EMRI Inspiral Evolution ($M=10^6 M_\odot, \mu=10 M_\odot, a={a_spin}$)")
 
     ax1_r = ax1.twinx() 
     color = 'tab:orange'

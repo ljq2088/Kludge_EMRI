@@ -32,9 +32,12 @@ struct OrbitState {
 class BabakNKOrbit {
 public:
     BabakNKOrbit(double M, double a, double p, double e, double iota, double mu);
-    
-    // 使用 emrikludge::KerrConstants
-    static KerrConstants get_conserved_quantities(double M, double a, double p, double e, double iota);
+    // 如果传入 0，则使用内部的 Schwarzschild 猜测
+    static KerrConstants get_conserved_quantities(
+        double M, double a, double p, double e, double iota,
+        double E_g = 0.0, double L_g = 0.0, double Q_g = 0.0
+    );
+
     NKFluxes compute_gg06_fluxes(double p, double e, double iota, double a, double M, double mu);
     std::vector<OrbitState> evolve(double duration, double dt);
 
