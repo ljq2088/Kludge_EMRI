@@ -41,12 +41,20 @@ public:
     NKFluxes compute_gg06_fluxes(double p, double e, double iota, double a, double M, double mu);
     std::vector<OrbitState> evolve(double duration, double dt);
 
+    // 获取当前状态 (用于调试或断点保存)
+    OrbitState get_current_state() const;
+
 private:
     double M_phys; 
     double mu_phys;
     double a_spin;
     double p0, e0, iota0;
     bool do_inspiral;
+
+    double m_t;
+    double m_p, m_e, m_iota;
+    double m_psi, m_chi, m_phi;
+
     KerrConstants k_cached; 
 
     static double radial_potential(double r, double M, double a, double E, double Lz, double Q);

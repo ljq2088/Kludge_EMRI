@@ -45,11 +45,33 @@ GG06Coeffs calc_g_coeffs(double e) {
 }
 
 namespace emrikludge {
-
+// 构造函数：初始化状态变量
 BabakNKOrbit::BabakNKOrbit(double M, double a, double p, double e, double iota, double mu)
-    : M_phys(M), a_spin(a), p0(p), e0(e), iota0(iota), mu_phys(mu) {
+    : M_phys(M), a_spin(a), mu_phys(mu) {
+    
     do_inspiral = (mu > 0.0);
+    
+    // 初始化状态
+    m_t = 0.0;
+    m_p = p;
+    m_e = e;
+    m_iota = iota;
+    m_psi = 0.0;
+    m_chi = 0.0;
+    m_phi = 0.0;
 }
+
+OrbitState BabakNKOrbit::get_current_state() const {
+    // 为了返回 r 和 theta，需要简单算一下
+    // 注意：这里不保证 mapping 成功，仅作简单转换
+    double r_val = m_p / (1.0 + m_e * cos(m_psi));
+    // theta 需要 mapping，这里简化返回 0 (调用者通常只关心 p,e,iota)
+    return {m_t, m_p, m_e, m_iota, m_psi, m_chi, m_phi, r_val, 0.0};
+}
+// BabakNKOrbit::BabakNKOrbit(double M, double a, double p, double e, double iota, double mu)
+//     : M_phys(M), a_spin(a), p0(p), e0(e), iota0(iota), mu_phys(mu) {
+//     do_inspiral = (mu > 0.0);
+// }
 
 double BabakNKOrbit::radial_potential(double r, double M, double a, double E, double Lz, double Q) {
     double Delta = r*r - 2*M*r + a*a;
@@ -283,47 +305,140 @@ NKFluxes BabakNKOrbit::compute_gg06_fluxes(double p, double e, double iota, doub
     return flux;
 }
 
+// std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
+//     std::vector<OrbitState> traj;
+//     size_t est_steps = (size_t)(duration/dt);
+//     traj.reserve(est_steps + 1000);
+    
+//     double t=0, p=p0, e=e0, iota=iota0, psi=0, chi=0, phi=0;
+//     double last_E = 0.0, last_L = 0.0, last_Q = 0.0;
+//     KerrConstants k_init = get_conserved_quantities(1.0, a_spin, p, e, iota); // Cold start
+//     if (k_init.E != 0.0) {
+//         last_E = k_init.E; last_L = k_init.Lz; last_Q = k_init.Q;
+//     }
+
+//     double last_print_t = 0;
+//     double print_interval = max(10.0, duration/100.0);
+//     while (t < duration) {
+//         KerrConstants k = get_conserved_quantities(1.0, a_spin, p, e, iota, last_E, last_L, last_Q);
+//         if (k.E == 0.0) {
+//             printf("[C++ Warning] Mapping failed during evolution at t=%.1f\n", t);
+//             break; 
+//         }
+//         last_E = k.E; last_L = k.Lz; last_Q = k.Q;
+//         double r_val = p / (1.0 + e * cos(psi));
+//         double z_val = k.z_minus * pow(cos(chi), 2);
+//         double theta_val = acos(sqrt(max(0.0, z_val)));
+//         traj.push_back({t, p, e, iota, psi, chi, phi, r_val, theta_val});
+
+//         if (t - last_print_t > print_interval) {
+//             printf("\r[C++ Integrating] t = %.1f / %.1f M (%.1f%%)", t, duration, (t/duration)*100.0);
+//             fflush(stdout);
+//             last_print_t = t;
+//         }
+
+//         if (p < 3.0 || e >= 0.999) break;
+
+//         // RK4
+//         auto get_derivs = [&](double cp, double ce, double ci, double cpsi, double cchi, double cphi) -> std::array<double, 6> {
+//             double dp_dt=0, de_dt=0, diota_dt=0;
+//             if (do_inspiral) {
+                
+//                 double mass_ratio = mu_phys / M_phys;
+//                 NKFluxes f = compute_gg06_fluxes(cp, ce, ci, a_spin, 1.0, mass_ratio);
+//                 dp_dt = f.dp_dt; de_dt = f.de_dt; diota_dt = f.diota_dt;
+//             }
+            
+//             KerrConstants ck = get_conserved_quantities(1.0, a_spin, cp, ce, ci);
+//             if (ck.E == 0.0) return {0,0,0,0,0,0};
+            
+//             double r = cp/(1+ce*cos(cpsi));
+//             double z = ck.z_minus * pow(cos(cchi), 2);
+//             double Delta = r*r - 2*r + a_spin*a_spin;
+            
+//             // V_t
+//             double Vt = a_spin*(ck.Lz - a_spin*ck.E*(1-z)) + ((r*r+a_spin*a_spin)/Delta)*(ck.E*(r*r+a_spin*a_spin)-ck.Lz*a_spin);
+            
+//             // dchi
+//             double gamma = ck.E * (pow(r*r+a_spin*a_spin, 2)/Delta - a_spin*a_spin) - (2*r*a_spin*ck.Lz)/Delta;
+//             double denom = gamma + a_spin*a_spin*ck.E*z;
+//             double dchi = sqrt(abs(ck.beta*(ck.z_plus-z))) / denom;
+            
+//             // dpsi
+//             double Tr = (1-ck.E*ck.E)*(ck.r_a-r)*(r-ck.r_p)*(r-ck.r3)*(r-ck.r4);
+//             double dr_dpsi = (cp*ce*sin(cpsi)) / pow(1+ce*cos(cpsi), 2);
+//             double dpsi = 0;
+//             if (abs(sin(cpsi)) < 1e-5) dpsi = sqrt(max(0.0, Tr)+1e-14)/(Vt*(abs(dr_dpsi)+1e-7));
+//             else dpsi = sqrt(max(0.0, Tr))/(Vt*abs(dr_dpsi));
+            
+//             double Vphi = ck.Lz/(1-z) - a_spin*ck.E + (a_spin/Delta)*(ck.E*(r*r+a_spin*a_spin)-ck.Lz*a_spin);
+//             double dphi = Vphi/Vt;
+            
+//             return {dp_dt, de_dt, diota_dt, dpsi, dchi, dphi};
+//         };
+        
+//         auto k1 = get_derivs(p, e, iota, psi, chi, phi);
+//         auto k2 = get_derivs(p+0.5*dt*k1[0], e+0.5*dt*k1[1], iota+0.5*dt*k1[2], psi+0.5*dt*k1[3], chi+0.5*dt*k1[4], phi+0.5*dt*k1[5]);
+//         auto k3 = get_derivs(p+0.5*dt*k2[0], e+0.5*dt*k2[1], iota+0.5*dt*k2[2], psi+0.5*dt*k2[3], chi+0.5*dt*k2[4], phi+0.5*dt*k2[5]);
+//         auto k4 = get_derivs(p+dt*k3[0], e+dt*k3[1], iota+dt*k3[2], psi+dt*k3[3], chi+dt*k3[4], phi+dt*k3[5]);
+        
+//         p += dt/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]);
+//         e += dt/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1]);
+//         iota += dt/6*(k1[2]+2*k2[2]+2*k3[2]+k4[2]);
+//         psi += dt/6*(k1[3]+2*k2[3]+2*k3[3]+k4[3]);
+//         chi += dt/6*(k1[4]+2*k2[4]+2*k3[4]+k4[4]);
+//         phi += dt/6*(k1[5]+2*k2[5]+2*k3[5]+k4[5]);
+        
+//         t += dt;
+//     }
+//     printf("\n[C++ Integrating] Done. t=%.1f\n", t);
+//     return traj;
+// }
+// 有状态的 Evolve
 std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
     std::vector<OrbitState> traj;
     size_t est_steps = (size_t)(duration/dt);
-    traj.reserve(est_steps + 1000);
+    traj.reserve(est_steps + 100);
     
-    double t=0, p=p0, e=e0, iota=iota0, psi=0, chi=0, phi=0;
-    double last_E = 0.0, last_L = 0.0, last_Q = 0.0;
-    KerrConstants k_init = get_conserved_quantities(1.0, a_spin, p, e, iota); // Cold start
-    if (k_init.E != 0.0) {
-        last_E = k_init.E; last_L = k_init.Lz; last_Q = k_init.Q;
-    }
+    double target_t = m_t + duration;
+    double last_print_t = m_t;
+    double print_interval = max(10.0, duration/10.0); // 每 10% 打印一次
 
-    double last_print_t = 0;
-    double print_interval = max(10.0, duration/100.0);
-    while (t < duration) {
-        KerrConstants k = get_conserved_quantities(1.0, a_spin, p, e, iota, last_E, last_L, last_Q);
+    // 积分主循环
+    while (m_t < target_t) {
+        // 1. Mapping
+        KerrConstants k = get_conserved_quantities(1.0, a_spin, m_p, m_e, m_iota);
         if (k.E == 0.0) {
-            printf("[C++ Warning] Mapping failed during evolution at t=%.1f\n", t);
+            printf("[C++ Error] Mapping failed at t=%.2f\n", m_t);
             break; 
         }
-        last_E = k.E; last_L = k.Lz; last_Q = k.Q;
-        double r_val = p / (1.0 + e * cos(psi));
-        double z_val = k.z_minus * pow(cos(chi), 2);
-        double theta_val = acos(sqrt(max(0.0, z_val)));
-        traj.push_back({t, p, e, iota, psi, chi, phi, r_val, theta_val});
 
-        if (t - last_print_t > print_interval) {
-            printf("\r[C++ Integrating] t = %.1f / %.1f M (%.1f%%)", t, duration, (t/duration)*100.0);
+        // 2. 记录 (Output)
+        double r_val = m_p / (1.0 + m_e * cos(m_psi));
+        double z_val = k.z_minus * pow(cos(m_chi), 2);
+        double theta_val = acos(sqrt(max(0.0, z_val)));
+        
+        traj.push_back({m_t, m_p, m_e, m_iota, m_psi, m_chi, m_phi, r_val, theta_val});
+
+        // 进度条 (相对于本次 Chunk)
+        if (m_t - last_print_t > print_interval) {
+            printf("\r[C++ Chunk] t = %.1f / %.1f (Target: %.1f)", m_t, target_t, target_t);
             fflush(stdout);
-            last_print_t = t;
+            last_print_t = m_t;
         }
 
-        if (p < 3.0 || e >= 0.999) break;
+        // 终止条件
+        if (m_p < 3.0 || m_e >= 0.999) {
+            printf("\n[C++ Stop] Plunge detected at t=%.2f\n", m_t);
+            break;
+        }
 
-        // RK4
+        // 3. RK4 Step (使用成员变量)
         auto get_derivs = [&](double cp, double ce, double ci, double cpsi, double cchi, double cphi) -> std::array<double, 6> {
             double dp_dt=0, de_dt=0, diota_dt=0;
             if (do_inspiral) {
-                
-                double mass_ratio = mu_phys / M_phys;
-                NKFluxes f = compute_gg06_fluxes(cp, ce, ci, a_spin, 1.0, mass_ratio);
+                double q_mass = mu_phys / M_phys;
+                NKFluxes f = compute_gg06_fluxes(cp, ce, ci, a_spin, 1.0, q_mass);
                 dp_dt = f.dp_dt; de_dt = f.de_dt; diota_dt = f.diota_dt;
             }
             
@@ -334,15 +449,12 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
             double z = ck.z_minus * pow(cos(cchi), 2);
             double Delta = r*r - 2*r + a_spin*a_spin;
             
-            // V_t
             double Vt = a_spin*(ck.Lz - a_spin*ck.E*(1-z)) + ((r*r+a_spin*a_spin)/Delta)*(ck.E*(r*r+a_spin*a_spin)-ck.Lz*a_spin);
             
-            // dchi
             double gamma = ck.E * (pow(r*r+a_spin*a_spin, 2)/Delta - a_spin*a_spin) - (2*r*a_spin*ck.Lz)/Delta;
             double denom = gamma + a_spin*a_spin*ck.E*z;
             double dchi = sqrt(abs(ck.beta*(ck.z_plus-z))) / denom;
             
-            // dpsi
             double Tr = (1-ck.E*ck.E)*(ck.r_a-r)*(r-ck.r_p)*(r-ck.r3)*(r-ck.r4);
             double dr_dpsi = (cp*ce*sin(cpsi)) / pow(1+ce*cos(cpsi), 2);
             double dpsi = 0;
@@ -355,22 +467,25 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
             return {dp_dt, de_dt, diota_dt, dpsi, dchi, dphi};
         };
         
-        auto k1 = get_derivs(p, e, iota, psi, chi, phi);
-        auto k2 = get_derivs(p+0.5*dt*k1[0], e+0.5*dt*k1[1], iota+0.5*dt*k1[2], psi+0.5*dt*k1[3], chi+0.5*dt*k1[4], phi+0.5*dt*k1[5]);
-        auto k3 = get_derivs(p+0.5*dt*k2[0], e+0.5*dt*k2[1], iota+0.5*dt*k2[2], psi+0.5*dt*k2[3], chi+0.5*dt*k2[4], phi+0.5*dt*k2[5]);
-        auto k4 = get_derivs(p+dt*k3[0], e+dt*k3[1], iota+dt*k3[2], psi+dt*k3[3], chi+dt*k3[4], phi+dt*k3[5]);
+        auto k1 = get_derivs(m_p, m_e, m_iota, m_psi, m_chi, m_phi);
+        // ... (标准 RK4，省略中间变量，使用临时变量计算 k2, k3, k4) ...
+        // 为了代码简洁，这里你需要把之前的 RK4 逻辑复制过来，只是把 update 对象改成 m_p 等成员变量
         
-        p += dt/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]);
-        e += dt/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1]);
-        iota += dt/6*(k1[2]+2*k2[2]+2*k3[2]+k4[2]);
-        psi += dt/6*(k1[3]+2*k2[3]+2*k3[3]+k4[3]);
-        chi += dt/6*(k1[4]+2*k2[4]+2*k3[4]+k4[4]);
-        phi += dt/6*(k1[5]+2*k2[5]+2*k3[5]+k4[5]);
+        double dt2 = 0.5*dt;
+        auto k2 = get_derivs(m_p+dt2*k1[0], m_e+dt2*k1[1], m_iota+dt2*k1[2], m_psi+dt2*k1[3], m_chi+dt2*k1[4], m_phi+dt2*k1[5]);
+        auto k3 = get_derivs(m_p+dt2*k2[0], m_e+dt2*k2[1], m_iota+dt2*k2[2], m_psi+dt2*k2[3], m_chi+dt2*k2[4], m_phi+dt2*k2[5]);
+        auto k4 = get_derivs(m_p+dt*k3[0],  m_e+dt*k3[1],  m_iota+dt*k3[2],  m_psi+dt*k3[3],  m_chi+dt*k3[4],  m_phi+dt*k3[5]);
+
+        m_p    += dt/6.0 * (k1[0] + 2*k2[0] + 2*k3[0] + k4[0]);
+        m_e    += dt/6.0 * (k1[1] + 2*k2[1] + 2*k3[1] + k4[1]);
+        m_iota += dt/6.0 * (k1[2] + 2*k2[2] + 2*k3[2] + k4[2]);
+        m_psi  += dt/6.0 * (k1[3] + 2*k2[3] + 2*k3[3] + k4[3]);
+        m_chi  += dt/6.0 * (k1[4] + 2*k2[4] + 2*k3[4] + k4[4]);
+        m_phi  += dt/6.0 * (k1[5] + 2*k2[5] + 2*k3[5] + k4[5]);
         
-        t += dt;
+        m_t += dt;
     }
-    printf("\n[C++ Integrating] Done. t=%.1f\n", t);
+    
     return traj;
 }
-
 } // namespace
