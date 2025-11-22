@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
+#include <cstdio> 
 //定义常数PI
 const double PI = 3.14159265358979323846;
 using namespace std;
@@ -450,7 +451,9 @@ NKFluxes BabakNKOrbit::compute_gg06_fluxes(double p, double e, double iota, doub
 }
 std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
     std::vector<OrbitState> traj;
-    
+    double last_print_t = 0.0;
+    double print_interval = duration / 100.0; // 每 1% 打印一次
+    if (print_interval < 10.0) print_interval = 10.0;
     // 预估步数并分配内存 (避免动态扩容开销)
     size_t estimated_steps = static_cast<size_t>(duration / dt);
     traj.reserve(estimated_steps + 1000);
@@ -551,7 +554,15 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
             
             return {dp_dt, de_dt, diota_dt, dpsi_dt, dchi_dt, dphi_dt};
         };
-        
+        // 打印进度
+        if (t - last_print_t > print_interval) {
+            double percent = (t / duration) * 100.0;
+            // \r 回车不换行，实现动态刷新
+            // fflush 确保立即显示
+            printf("\r[C++ Integrating] t = %.1f / %.1f M (%.1f%%)", t, duration, percent);
+            fflush(stdout);
+            last_print_t = t;
+        }
         // RK4 Step
         auto k1 = get_derivs(p, e, iota, psi, chi, phi);
         
