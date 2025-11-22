@@ -96,15 +96,15 @@ def run_inspiral_demo():
     # 初始轨道几何参数
     p_init = 10.0     # 初始半通径 p/M
     e_init = 0.6      # 初始偏心率
-    iota_init = np.radians(30.0)  # 初始倾角 (60度)
+    iota_init = np.radians(30.0)  # 初始倾角 (30度)
 
     # 演化控制
     # 演化时间 (以 M 为单位)。
     # 1 M_sun 的 M 约为 4.92e-6 秒。
     # 1e6 M_sun 的 1 M 约为 4.92 秒。
-    T=4.0# 年
+    T=0.5 #年
     duration_M=T*365.0*24.0*3600.0 / (G_SI * (M_phys * M_SUN_SI) / (C_SI**3))
-    dt=10.0 #10秒
+    dt=2.0 #秒
     dt_M = dt* (C_SI**3) /(G_SI * (M_phys * M_SUN_SI))
 
     # 观测者设置
