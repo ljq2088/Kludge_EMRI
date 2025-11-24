@@ -186,7 +186,8 @@ def run_production_pipeline():
     dist_meters = DL * 1e9 * 3.086e16
     # To fix index errors, ensure dt_M isn't too small relative to duration
     # But for 1 year run, 0.1-2.0 is fine.
-    dt_M = 0.1014826  # Using your previous specific value or set to 1.0/2.0
+    dt = 10.0 # seconds
+    dt_M=dt / T_unit_sec
     
     print(f"=== EMRI Chunked Waveform Generation ===")
     print(f"[Physics] M = {M_phys_solar:.1e} M_sun, mu = {mu_phys_solar:.1f} M_sun")
@@ -207,22 +208,100 @@ def run_production_pipeline():
             raise RuntimeError("Need C++ extension for long run!")
             
         start_t = time.time()
+        # 初始化 C++ 对象
         orbiter = BabakNKOrbit_CPP(M_phys_solar, a_spin, p_init, e_init, iota_init, mu_phys_solar)
         
-        # Run evolution
-        cpp_results = orbiter.evolve(total_duration_M, dt_M)
-        
-        print(f"[C++] Evolution finished in {time.time()-start_t:.2f} s")
-        
-        if len(cpp_results) == 0:
-            print("Error: C++ evolution returned 0 steps! Check parameters or C++ logic.")
-            return
+        # 准备 HDF5 文件
+        with h5py.File(filename, 'w') as f:
+            # 写入元数据
+            f.attrs['M'] = M_phys_solar
+            f.attrs['mu'] = mu_phys_solar
+            f.attrs['a'] = a_spin
+            f.attrs['dt'] = dt_M # 预设 dt
 
-        save_trajectory_to_h5(filename, cpp_results, M_phys_solar, mu_phys_solar, a_spin)
-        
-        del cpp_results
+            # 创建可扩展数据集 (chunks=True 启用分块存储，compression 启用压缩)
+            # maxshape=(None,) 允许该维度无限增长
+            dset_t = f.create_dataset('t', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_p = f.create_dataset('p', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_e = f.create_dataset('e', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_iota = f.create_dataset('iota', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_r = f.create_dataset('r', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_theta = f.create_dataset('theta', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_phi = f.create_dataset('phi', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_psi = f.create_dataset('psi', (0,), maxshape=(None,), dtype='f8', chunks=True)
+            dset_chi = f.create_dataset('chi', (0,), maxshape=(None,), dtype='f8', chunks=True)
+
+            # 分块参数
+            chunk_duration = total_duration_M / 100.0 # 每次算 1% 的总时长
+            current_t = 0.0
+            total_steps = 0
+            
+            print(f"[Loop] Starting chunked evolution. Chunk size ~ {chunk_duration:.1f} M")
+
+            while current_t < total_duration_M:
+                # 1. 调用 C++ 演化一小段
+                # C++ 对象内部会自动保存状态 (m_p, m_e 等)，所以下次调用会自动接着算
+                traj_chunk = orbiter.evolve(chunk_duration, dt_M)
+                
+                # 检查是否因 Plunge 提前结束
+                n_chunk = len(traj_chunk)
+                if n_chunk == 0:
+                    print("\n[Stop] Evolution terminated early (Plunge or Error).")
+                    break
+
+                # 2. 扩展 HDF5 数据集大小
+                old_len = dset_t.shape[0]
+                new_len = old_len + n_chunk
+                
+                
+
+                if old_len > 0:
+                    write_chunk = traj_chunk[1:]
+                else:
+                    write_chunk = traj_chunk
+
+                n_to_write = len(write_chunk)
+                
+                # 如果切片后没数据了（极罕见情况），直接跳过
+                if n_to_write == 0:
+                    continue
+
+                # 2. 扩展 HDF5 数据集大小
+                new_len = old_len + n_to_write  # 注意这里用 n_to_write
+                
+                dset_t.resize((new_len,))
+                dset_p.resize((new_len,))
+                dset_e.resize((new_len,))
+                dset_iota.resize((new_len,))
+                dset_r.resize((new_len,))
+                dset_theta.resize((new_len,))
+                dset_phi.resize((new_len,))
+                dset_psi.resize((new_len,))
+                dset_chi.resize((new_len,))
+                # 3. 写入数据 (使用 write_chunk 而不是 traj_chunk)
+                dset_t[old_len:] = [s.t for s in write_chunk]
+                dset_p[old_len:] = [s.p for s in write_chunk]
+                dset_e[old_len:] = [s.e for s in write_chunk]
+                dset_iota[old_len:] = [s.iota for s in write_chunk]
+                dset_r[old_len:] = [s.r for s in write_chunk]
+                dset_theta[old_len:] = [s.theta for s in write_chunk]
+                dset_phi[old_len:] = [s.phi for s in write_chunk]
+                dset_psi[old_len:] = [s.psi for s in write_chunk]
+                dset_chi[old_len:] = [s.chi for s in write_chunk]
+                
+                # 更新状态
+                # 注意：current_t 还是取原始数据的最后一个时间
+                current_t = traj_chunk[-1].t
+                total_steps = new_len
+                print(f"  [Chunk] Saved {n_chunk} pts. Total: {total_steps}. Current t={current_t:.1f}")
+                
+                # 4. 强制释放内存
+                del traj_chunk
+                import gc; gc.collect()
+
+        print(f"[C++] Evolution loop finished. Total steps: {total_steps}")
         del orbiter
-        import gc; gc.collect()
+        gc.collect()
     else:
         print(f"\n[1/3] Using existing valid data from {filename}.")
 

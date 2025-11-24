@@ -548,23 +548,33 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt_sampling
     // 我们希望在 t = 0, dt, 2dt, ... 输出
     // GSL driver 的 apply 函数会自动积分到指定时间点 t_target
     
-    double t_next = 0.0;
-    
-    while (t_next <= duration) {
-        // 1. 推进到下一个采样点
-        while (t < t_next) {
-            int status = gsl_odeiv2_evolve_apply(e, c, s, &sys, &t, t_next, &h, y);
+    double t_start = t;
+    double t_end = m_t + duration;
+    // double t_next = t;
+    double t_target_sample = m_t;
+    // while (t_next <= duration) {
+    //     // 1. 推进到下一个采样点
+    //     while (t < t_next) {
+    //         int status = gsl_odeiv2_evolve_apply(e, c, s, &sys, &t, t_next, &h, y);
             
+    //         if (status != GSL_SUCCESS) {
+    //             if (status == GSL_EDOM) {
+    //                 printf("\n[C++ Stop] Plunge detected at t=%.2f (p=%.4f, e=%.4f)\n", t, y[0], y[1]);
+    //             } else {
+    //                 printf("\n[C++ Error] GSL Integration failed (status %d) at t=%.2f\n", status, t);
+    //             }
+    //             goto cleanup; // 跳出双层循环
+    //         }
+    //     }
+    while (t_target_sample <= t_end) {
+        // 1. 积分推进到采样点
+        while (t < t_target_sample) {
+            int status = gsl_odeiv2_evolve_apply(e, c, s, &sys, &t, t_target_sample, &h, y);
             if (status != GSL_SUCCESS) {
-                if (status == GSL_EDOM) {
-                    printf("\n[C++ Stop] Plunge detected at t=%.2f (p=%.4f, e=%.4f)\n", t, y[0], y[1]);
-                } else {
-                    printf("\n[C++ Error] GSL Integration failed (status %d) at t=%.2f\n", status, t);
-                }
-                goto cleanup; // 跳出双层循环
+               // ... 报错处理保持不变 ...
+               goto cleanup;
             }
-        }
-        
+        }    
         // 2. 到达采样点，记录数据
         // 此时 t == t_next (在误差范围内)
         
@@ -586,12 +596,15 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt_sampling
         
         // 进度条
         if (t - last_print_t > print_interval) {
-            printf("\r[C++ Integrating] t = %.1f / %.1f M (%.1f%%) | h ~ %.2e", t, duration, (t/duration)*100.0, h);
+            // 计算当前块内的相对进度
+            double chunk_progress = (t - t_start) / (t_end - t_start) * 100.0;
+            printf("\r[C++ Integrating] Chunk progress: %.1f%% | t = %.1f M | h ~ %.2e", 
+                   chunk_progress, t, h);
             fflush(stdout);
             last_print_t = t;
         }
         
-        t_next += dt_sampling;
+        t_target_sample += dt_sampling;
     }
 
 cleanup:
@@ -599,20 +612,17 @@ cleanup:
     gsl_odeiv2_evolve_free(e);
     gsl_odeiv2_control_free(c);
     gsl_odeiv2_step_free(s);
-    // --- [新增] 保存当前状态，以便下次继续演化 ---
-    // y[] 数组里存的是最后的积分状态
+
+    // --- [新增] 保存状态 ---
+    m_t = t;
     m_p = y[0];
     m_e = y[1];
     m_iota = y[2];
     m_psi = y[3];
     m_chi = y[4];
     m_phi = y[5];
-    m_t = t; // 更新内部时间
-    int status = gsl_odeiv2_evolve_apply(e, c, s, &sys, &t, t_next, &h, y);
-    // 如果因为 Plunge 停止，可以重置或标记，防止下次继续算
-    if (status == GSL_EDOM) {
-        do_inspiral = false; // 停止演化
-    }
+    // --------------------
+
     return traj;
 }
 } // namespace
