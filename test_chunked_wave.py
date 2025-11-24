@@ -157,7 +157,7 @@ def run_production_pipeline():
     M_phys_solar = 1e6
     mu_phys_solar = 10.0
     a_spin = 0.7
-    p_init, e_init, iota_init = 10.0, 0.6, np.radians(30.0)
+    p_init, e_init, iota_init = 10.0, 0.8, np.radians(30.0)
     
     M_kg = M_phys_solar * M_SUN_SI
     T_unit_sec = G_SI * M_kg / (C_SI**3)
@@ -165,7 +165,8 @@ def run_production_pipeline():
     target_years = 1.0
     target_sec = target_years * SEC_PER_YEAR
     total_duration_M = target_sec / T_unit_sec
-    
+    DL=1.0#Gpc
+    dist_meters = DL * 1e9 * 3.086e16
     # To fix index errors, ensure dt_M isn't too small relative to duration
     # But for 1 year run, 0.1-2.0 is fine.
     dt_M = 0.1014826  # Using your previous specific value or set to 1.0/2.0
@@ -212,7 +213,7 @@ def run_production_pipeline():
     # Step 2: Waveform (IO Stream)
     # -------------------------------------------------
     print("\n[2/3] Computing Waveform (Streamed)...")
-    compute_waveform_io_stream(filename, ObserverInfo(1e9*3e22, np.pi/4, 0), batch_size=500000)
+    compute_waveform_io_stream(filename, ObserverInfo(dist_meters, np.pi/4, 0), batch_size=500000)
     
     # -------------------------------------------------
     # Step 3: Plot
