@@ -1,4 +1,7 @@
 // cpp/emrikludge/orbit/nk_orbit.cpp
+#include <gsl/gsl_errno.h>
+#include <gsl/gsl_matrix.h>
+#include <gsl/gsl_odeiv2.h>
 #include "nk_orbit.hpp"
 #include <iostream>
 #include <cmath>
@@ -304,7 +307,95 @@ NKFluxes BabakNKOrbit::compute_gg06_fluxes(double p, double e, double iota, doub
     
     return flux;
 }
+int BabakNKOrbit::gsl_derivs(double t, const double y[], double dydt[], void* params) {
+    // 解包参数
+    GSLParams* p = static_cast<GSLParams*>(params);
+    double M = 1.0; // 几何单位
+    double a = p->a;
+    double mu = p->mu;
+    bool inspiral = p->do_inspiral;
 
+    // 状态向量 y = {p, e, iota, psi, chi, phi}
+    double cp = y[0];
+    double ce = y[1];
+    double ci = y[2];
+    double cpsi = y[3];
+    double cchi = y[4];
+    double cphi = y[5];
+    
+    // 1. 检查物理边界 (Plunge)
+    // 如果越界，返回 GSL_EDOM (Domain Error) 或将导数置零并停止
+    if (cp < 3.0 || ce >= 0.999) {
+        // 这种情况下 GSL 会报错并停止，或者我们可以让导数为0
+        // 这里选择停止积分的一种 trick：返回错误码
+        return GSL_EDOM; 
+    }
+
+    // 2. 计算 Flux (Radiation Reaction)
+    double dp_dt=0, de_dt=0, diota_dt=0;
+    if (inspiral) {
+        // 注意：compute_gg06_fluxes 需要 mu/M
+        // 但我们传入的是 mu_phys, M_phys。在 params 里我们存的是什么？
+        // 在 evolve 里我们将计算好 mass_ratio 存入 mu
+        NKFluxes f = compute_gg06_fluxes(cp, ce, ci, a, M, mu);
+        dp_dt = f.dp_dt;
+        de_dt = f.de_dt;
+        diota_dt = f.diota_dt;
+    }
+    
+    // 3. 计算 Geodesic Motion
+    KerrConstants ck = get_conserved_quantities(M, a, cp, ce, ci);
+    if (ck.E == 0.0) return GSL_EFAILED; // Mapping 失败
+
+    double r = cp / (1.0 + ce * cos(cpsi));
+    double z = ck.z_minus * pow(cos(cchi), 2);
+    double Delta = r*r - 2.0*r + a*a;
+    
+    // V_phi
+    double sin2theta = 1.0 - z;
+    double term1 = ck.Lz / sin2theta;
+    double term2 = a * ck.E;
+    double term3 = (a / Delta) * (ck.E * (r*r + a*a) - ck.Lz * a);
+    double V_phi = term1 - term2 + term3;
+    
+    // V_t
+    double term1_t = a * (ck.Lz - a * ck.E * sin2theta);
+    double term2_t = ((r*r + a*a) / Delta) * (ck.E * (r*r + a*a) - ck.Lz * a);
+    double V_t = term1_t + term2_t;
+    
+    // dchi/dt
+    double gamma = ck.E * (pow(r*r + a*a, 2)/Delta - a*a) - (2.0 * r * a * ck.Lz) / Delta;
+    double denominator = gamma + a*a * ck.E * z;
+    double dchi_dt = sqrt(abs(ck.beta * (ck.z_plus - z))) / denominator;
+    
+    // dpsi/dt
+    double term_r = (1.0 - ck.E*ck.E) * (ck.r_a - r) * (r - ck.r_p) * (r - ck.r3) * (r - ck.r4);
+    double V_r = max(0.0, term_r);
+    double denom_psi = 1.0 + ce * cos(cpsi);
+    double dr_dpsi = (cp * ce * sin(cpsi)) / (denom_psi*denom_psi);
+    
+    double dpsi_dt = 0.0;
+    if (abs(sin(cpsi)) < 1e-5) {
+         dpsi_dt = sqrt(V_r + 1e-14) / (V_t * (abs(dr_dpsi) + 1e-7)); 
+         if (dr_dpsi < 0) dpsi_dt = -dpsi_dt; // 简化的符号处理，实际上 Babak Eq 8 更好
+         if (abs(dr_dpsi) < 1e-9) dpsi_dt = 1e-3; // 推动跨过转折点
+    } else {
+         dpsi_dt = sqrt(V_r) / (V_t * abs(dr_dpsi));
+    }
+    dpsi_dt = abs(dpsi_dt); // 强制正向积分
+    
+    double dphi_dt = V_phi / V_t;
+    
+    // 赋值结果
+    dydt[0] = dp_dt;
+    dydt[1] = de_dt;
+    dydt[2] = diota_dt;
+    dydt[3] = dpsi_dt;
+    dydt[4] = dchi_dt;
+    dydt[5] = dphi_dt;
+
+    return GSL_SUCCESS;
+}
 // std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
 //     std::vector<OrbitState> traj;
 //     size_t est_steps = (size_t)(duration/dt);
@@ -395,96 +486,96 @@ NKFluxes BabakNKOrbit::compute_gg06_fluxes(double p, double e, double iota, doub
 //     return traj;
 // }
 // 有状态的 Evolve
-std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt) {
+std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt_sampling) {
     std::vector<OrbitState> traj;
-    size_t est_steps = (size_t)(duration/dt);
-    traj.reserve(est_steps + 100);
     
-    double target_t = m_t + duration;
-    double last_print_t = m_t;
-    double print_interval = max(10.0, duration/10.0); // 每 10% 打印一次
+    // 预估容量
+    size_t est_steps = static_cast<size_t>(duration / dt_sampling);
+    traj.reserve(est_steps + 1000);
+    
+    // GSL 系统配置
+    // 维度=6: p, e, iota, psi, chi, phi
+    GSLParams params;
+    params.M = 1.0;
+    params.a = a_spin;
+    params.mu = mu_phys / M_phys; // 🛡️ 再次确保这里是质量比
+    params.do_inspiral = do_inspiral;
+    params.orbit_ptr = this;
 
-    // 积分主循环
-    while (m_t < target_t) {
-        // 1. Mapping
-        KerrConstants k = get_conserved_quantities(1.0, a_spin, m_p, m_e, m_iota);
-        if (k.E == 0.0) {
-            printf("[C++ Error] Mapping failed at t=%.2f\n", m_t);
-            break; 
+    gsl_odeiv2_system sys = {gsl_derivs, NULL, 6, &params};
+
+    // 选择积分器：rk8pd (Prince-Dormand 8,9阶) 是高精度轨道的首选
+    // rk45 (Fehlberg 4,5阶) 是通用选择
+    const gsl_odeiv2_step_type * T = gsl_odeiv2_step_rk8pd;
+    gsl_odeiv2_step * s = gsl_odeiv2_step_alloc(T, 6);
+    
+    // 控制器：设置绝对误差和相对误差
+    // EMRI 需要高精度，建议 eps_abs=1e-10, eps_rel=1e-10
+    // 如果太慢，可以放宽到 1e-8
+    gsl_odeiv2_control * c = gsl_odeiv2_control_y_new(1e-9, 1e-9);
+    
+    // 演化驱动器
+    gsl_odeiv2_evolve * e = gsl_odeiv2_evolve_alloc(6);
+
+    // 初始状态
+    double t = 0.0;
+    double t1 = duration;
+    double h = 1e-3; // 初始试探步长 (GSL 会自动调整)
+    double y[6] = {p0, e0, iota0, 0.0, 0.0, 0.0};
+
+    // 打印进度控制
+    double last_print_t = 0;
+    double print_interval = max(10.0, duration/100.0);
+    
+    // --- 主循环：按采样点输出 (Dense Output) ---
+    // 我们希望在 t = 0, dt, 2dt, ... 输出
+    // GSL driver 的 apply 函数会自动积分到指定时间点 t_target
+    
+    double t_next = 0.0;
+    
+    while (t_next <= duration) {
+        // 1. 推进到下一个采样点
+        while (t < t_next) {
+            int status = gsl_odeiv2_evolve_apply(e, c, s, &sys, &t, t_next, &h, y);
+            
+            if (status != GSL_SUCCESS) {
+                if (status == GSL_EDOM) {
+                    printf("\n[C++ Stop] Plunge detected at t=%.2f (p=%.4f, e=%.4f)\n", t, y[0], y[1]);
+                } else {
+                    printf("\n[C++ Error] GSL Integration failed (status %d) at t=%.2f\n", status, t);
+                }
+                goto cleanup; // 跳出双层循环
+            }
         }
-
-        // 2. 记录 (Output)
-        double r_val = m_p / (1.0 + m_e * cos(m_psi));
-        double z_val = k.z_minus * pow(cos(m_chi), 2);
+        
+        // 2. 到达采样点，记录数据
+        // 此时 t == t_next (在误差范围内)
+        
+        // 重新计算辅助坐标 (r, theta)
+        // 注意：为了性能，这里又调了一次 Mapping。如果这是瓶颈，可以在 derivs 里存下来，但这很麻烦。
+        // 考虑到采样点远少于积分步，这里调一次是可以接受的。
+        KerrConstants k = get_conserved_quantities(1.0, a_spin, y[0], y[1], y[2]);
+        double r_val = y[0] / (1.0 + y[1] * cos(y[3]));
+        double z_val = k.z_minus * pow(cos(y[4]), 2);
         double theta_val = acos(sqrt(max(0.0, z_val)));
         
-        traj.push_back({m_t, m_p, m_e, m_iota, m_psi, m_chi, m_phi, r_val, theta_val});
-
-        // 进度条 (相对于本次 Chunk)
-        if (m_t - last_print_t > print_interval) {
-            printf("\r[C++ Chunk] t = %.1f / %.1f (Target: %.1f)", m_t, target_t, target_t);
+        traj.push_back({t, y[0], y[1], y[2], y[3], y[4], y[5], r_val, theta_val});
+        
+        // 进度条
+        if (t - last_print_t > print_interval) {
+            printf("\r[C++ Integrating] t = %.1f / %.1f M (%.1f%%) | h ~ %.2e", t, duration, (t/duration)*100.0, h);
             fflush(stdout);
-            last_print_t = m_t;
+            last_print_t = t;
         }
-
-        // 终止条件
-        if (m_p < 3.0 || m_e >= 0.999) {
-            printf("\n[C++ Stop] Plunge detected at t=%.2f\n", m_t);
-            break;
-        }
-
-        // 3. RK4 Step (使用成员变量)
-        auto get_derivs = [&](double cp, double ce, double ci, double cpsi, double cchi, double cphi) -> std::array<double, 6> {
-            double dp_dt=0, de_dt=0, diota_dt=0;
-            if (do_inspiral) {
-                double q_mass = mu_phys / M_phys;
-                NKFluxes f = compute_gg06_fluxes(cp, ce, ci, a_spin, 1.0, q_mass);
-                dp_dt = f.dp_dt; de_dt = f.de_dt; diota_dt = f.diota_dt;
-            }
-            
-            KerrConstants ck = get_conserved_quantities(1.0, a_spin, cp, ce, ci);
-            if (ck.E == 0.0) return {0,0,0,0,0,0};
-            
-            double r = cp/(1+ce*cos(cpsi));
-            double z = ck.z_minus * pow(cos(cchi), 2);
-            double Delta = r*r - 2*r + a_spin*a_spin;
-            
-            double Vt = a_spin*(ck.Lz - a_spin*ck.E*(1-z)) + ((r*r+a_spin*a_spin)/Delta)*(ck.E*(r*r+a_spin*a_spin)-ck.Lz*a_spin);
-            
-            double gamma = ck.E * (pow(r*r+a_spin*a_spin, 2)/Delta - a_spin*a_spin) - (2*r*a_spin*ck.Lz)/Delta;
-            double denom = gamma + a_spin*a_spin*ck.E*z;
-            double dchi = sqrt(abs(ck.beta*(ck.z_plus-z))) / denom;
-            
-            double Tr = (1-ck.E*ck.E)*(ck.r_a-r)*(r-ck.r_p)*(r-ck.r3)*(r-ck.r4);
-            double dr_dpsi = (cp*ce*sin(cpsi)) / pow(1+ce*cos(cpsi), 2);
-            double dpsi = 0;
-            if (abs(sin(cpsi)) < 1e-5) dpsi = sqrt(max(0.0, Tr)+1e-14)/(Vt*(abs(dr_dpsi)+1e-7));
-            else dpsi = sqrt(max(0.0, Tr))/(Vt*abs(dr_dpsi));
-            
-            double Vphi = ck.Lz/(1-z) - a_spin*ck.E + (a_spin/Delta)*(ck.E*(r*r+a_spin*a_spin)-ck.Lz*a_spin);
-            double dphi = Vphi/Vt;
-            
-            return {dp_dt, de_dt, diota_dt, dpsi, dchi, dphi};
-        };
         
-        auto k1 = get_derivs(m_p, m_e, m_iota, m_psi, m_chi, m_phi);
-        // ... (标准 RK4，省略中间变量，使用临时变量计算 k2, k3, k4) ...
-        // 为了代码简洁，这里你需要把之前的 RK4 逻辑复制过来，只是把 update 对象改成 m_p 等成员变量
-        
-        double dt2 = 0.5*dt;
-        auto k2 = get_derivs(m_p+dt2*k1[0], m_e+dt2*k1[1], m_iota+dt2*k1[2], m_psi+dt2*k1[3], m_chi+dt2*k1[4], m_phi+dt2*k1[5]);
-        auto k3 = get_derivs(m_p+dt2*k2[0], m_e+dt2*k2[1], m_iota+dt2*k2[2], m_psi+dt2*k2[3], m_chi+dt2*k2[4], m_phi+dt2*k2[5]);
-        auto k4 = get_derivs(m_p+dt*k3[0],  m_e+dt*k3[1],  m_iota+dt*k3[2],  m_psi+dt*k3[3],  m_chi+dt*k3[4],  m_phi+dt*k3[5]);
-
-        m_p    += dt/6.0 * (k1[0] + 2*k2[0] + 2*k3[0] + k4[0]);
-        m_e    += dt/6.0 * (k1[1] + 2*k2[1] + 2*k3[1] + k4[1]);
-        m_iota += dt/6.0 * (k1[2] + 2*k2[2] + 2*k3[2] + k4[2]);
-        m_psi  += dt/6.0 * (k1[3] + 2*k2[3] + 2*k3[3] + k4[3]);
-        m_chi  += dt/6.0 * (k1[4] + 2*k2[4] + 2*k3[4] + k4[4]);
-        m_phi  += dt/6.0 * (k1[5] + 2*k2[5] + 2*k3[5] + k4[5]);
-        
-        m_t += dt;
+        t_next += dt_sampling;
     }
+
+cleanup:
+    printf("\n[C++ Integrating] Done. Final t=%.1f\n", t);
+    gsl_odeiv2_evolve_free(e);
+    gsl_odeiv2_control_free(c);
+    gsl_odeiv2_step_free(s);
     
     return traj;
 }

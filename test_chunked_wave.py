@@ -41,9 +41,42 @@ class TrajChunkAdapter:
     iota: np.ndarray = None
     psi: np.ndarray = None
     chi: np.ndarray = None
+
+# ==========================================
+# 1. 严谨的物理参数设置
+# ==========================================
+# 物理常数
 G_SI = 6.67430e-11
 C_SI = 299792458.0
 M_SUN_SI = 1.989e30
+SEC_PER_YEAR = 31536000.0
+
+# 系统参数
+M_BH_SOLAR = 1e6
+mu_OBJ_SOLAR = 10.0
+
+# --- 关键修正：时间单位转换 ---
+# 1. 计算几何时间单位 GM/c^3 (秒)
+M_BH_kg = M_BH_SOLAR * M_SUN_SI
+T_unit_sec = G_SI * M_BH_kg / (C_SI**3)  # 约 4.925 秒 (对于 1e6 M_sun)
+
+print(f"[Debug] 1 M time unit = {T_unit_sec:.6f} seconds")
+
+# 2. 设定总时长 (1年)
+target_years = 0.5
+target_seconds = target_years * SEC_PER_YEAR
+
+# 3. 换算为 M 单位
+# 公式： 物理时间 / (1M对应的秒数)
+total_duration_M = target_seconds / T_unit_sec 
+
+# 打印验证 (应该是 6.4e6 左右)
+print(f"[Debug] Total Duration: {target_years} years = {target_seconds:.2e} s = {total_duration_M:.2e} M")
+
+# 分块大小 (10万 M 一块)
+chunk_size_M = 100000.0  
+dt_M = 0.05        
+print(f"[Setup] Chunk Size: {chunk_size_M} M, Time Step: {dt_M} M")          
 # -----------------------------------------------------------------------------
 # 2. 主程序
 # -----------------------------------------------------------------------------
@@ -53,15 +86,15 @@ def run_chunked_wave_generation():
     # --- A. 参数设置 ---
     M_BH = 1e6        # M_sun
     mu_Obj = 10.0     # M_sun
-    a_spin = 0.7
+    a_spin = 0.1
     
-    p0, e0, iota0_deg = 10.0, 0.5, 60.0
+    p0, e0, iota0_deg = 10.0, 0.3, 60.0
     iota0 = np.radians(iota0_deg)
     
-    # 演化设置
-    total_duration_M = 0.5*3600.0*24.0*365.0*C_SI / (G_SI * (M_BH * M_SUN_SI))  # 总时长 (M) -> 根据需要设为 6.4e6 (1年)
-    chunk_size_M = 500000.0       # 每次计算 1万 M (内存友好)
-    dt_M = 1.0                   # 采样步长 (M)
+    # # 演化设置
+    # total_duration_M = 0.5*3600.0*24.0*365.0*C_SI / (G_SI * (M_BH * M_SUN_SI))  # 总时长 (M) -> 根据需要设为 6.4e6 (1年)
+    # chunk_size_M = 500000.0       # 每次计算 1万 M (内存友好)
+    # dt_M = 1.0                   # 采样步长 (M)
 
     # 观测者
     dist_Gpc = 1.0
@@ -174,10 +207,10 @@ def run_chunked_wave_generation():
     print(f"       Saved to: {output_file}")
 
     # --- E. 简单验证绘图 (只读取最后一点点) ---
-    print("[Plot] Plotting last 1000 points check...")
+    #print("[Plot] Plotting last  points check...")
     with h5py.File(output_file, "r") as f:
-        t_last = f["t"][-10000:]
-        hp_last = f["h_plus"][-10000:]
+        t_last = f["t"][-500:]
+        hp_last = f["h_plus"][-500:]
         
         plt.figure(figsize=(10, 4))
         plt.plot(t_last, hp_last)

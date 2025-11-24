@@ -28,7 +28,15 @@ struct OrbitState {
     double r; 
     double theta;
 };
-
+// 用于传递给 GSL 函数的参数包
+struct GSLParams {
+    double M;
+    double a;
+    double mu;
+    bool do_inspiral;
+    // 指向当前对象的指针，以便调用静态工具函数
+    void* orbit_ptr; 
+};
 class BabakNKOrbit {
 public:
     BabakNKOrbit(double M, double a, double p, double e, double iota, double mu);
@@ -37,8 +45,7 @@ public:
         double M, double a, double p, double e, double iota,
         double E_g = 0.0, double L_g = 0.0, double Q_g = 0.0
     );
-
-    NKFluxes compute_gg06_fluxes(double p, double e, double iota, double a, double M, double mu);
+    static NKFluxes compute_gg06_fluxes(double p, double e, double iota, double a, double M, double mu);
     std::vector<OrbitState> evolve(double duration, double dt);
 
     // 获取当前状态 (用于调试或断点保存)
@@ -56,7 +63,7 @@ private:
     double m_psi, m_chi, m_phi;
 
     KerrConstants k_cached; 
-
+    static int gsl_derivs(double t, const double y[], double dydt[], void* params);
     static double radial_potential(double r, double M, double a, double E, double Lz, double Q);
     static double radial_potential_deriv(double r, double M, double a, double E, double Lz, double Q);
 };

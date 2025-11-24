@@ -43,7 +43,11 @@ ext_modules = [
             pybind11.get_include(),
             pybind11.get_include(user=True),
         ],
-        
+        library_dirs=[
+            # ⚠️ 告诉链接器去哪里找 libgsl
+            # os.path.join(sys.prefix, 'lib') 
+        ],
+        libraries=['gsl', 'gslcblas', 'm'], # 关键：链接 gsl, gslcblas 和 math 库
         # 编译参数
         language="c++",
         extra_compile_args=[
