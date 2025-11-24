@@ -1,225 +1,264 @@
 import numpy as np
-import h5py
-import time
-import sys
-from dataclasses import dataclass
 import matplotlib.pyplot as plt
+import time
+import h5py
+import os
+from dataclasses import dataclass
 
-# 引入核心模块
+# Import core modules
 from src.emrikludge.orbits.nk_geodesic_orbit import BabakNKOrbit
 from src.emrikludge.waveforms.nk_waveform import compute_nk_waveform, ObserverInfo
+from src.emrikludge.orbits.nk_mapping import get_conserved_quantities
 
-# 尝试导入 C++ 加速模块
+# Try importing C++ extension
 try:
     from src.emrikludge._emrikludge import BabakNKOrbit_CPP
     CPP_AVAILABLE = True
-    print("[Setup] C++ Acceleration Kernel Detected. 🚀")
 except ImportError:
     CPP_AVAILABLE = False
-    print("[Setup] Using Python Kernel (Slow). 🐢")
-
-# -----------------------------------------------------------------------------
-# 1. 适配器 (Adapter)
-# -----------------------------------------------------------------------------
-@dataclass
-class TrajChunkAdapter:
-    """
-    轻量级适配器：只包装当前 Chunk 的数据传给波形函数。
-    """
-    t: np.ndarray
-    r: np.ndarray
-    theta: np.ndarray
-    phi: np.ndarray
-    # 波形计算其实只需要 r, theta, phi (在 Minkowski 转换中用到)
-    # 如果 nk_waveform.py 需要其他字段，可以补上，但在你的实现里似乎只需要坐标
-    
-    # 为了兼容性，补充其他字段 (可以是空或伪造，如果 compute_nk_waveform 不用它们)
-    # 根据 nk_waveform.py 的 get_minkowski_trajectory，只需要 r, theta, phi
-    # 但为了安全，我们把所有字段都填上
-    p: np.ndarray = None
-    e: np.ndarray = None
-    iota: np.ndarray = None
-    psi: np.ndarray = None
-    chi: np.ndarray = None
+    print("⚠️ Warning: C++ extension not found.")
 
 # ==========================================
-# 1. 严谨的物理参数设置
+# 0. Helpers & Config
 # ==========================================
-# 物理常数
 G_SI = 6.67430e-11
 C_SI = 299792458.0
 M_SUN_SI = 1.989e30
 SEC_PER_YEAR = 31536000.0
 
-# 系统参数
-M_BH_SOLAR = 1e6
-mu_OBJ_SOLAR = 10.0
-
-# --- 关键修正：时间单位转换 ---
-# 1. 计算几何时间单位 GM/c^3 (秒)
-M_BH_kg = M_BH_SOLAR * M_SUN_SI
-T_unit_sec = G_SI * M_BH_kg / (C_SI**3)  # 约 4.925 秒 (对于 1e6 M_sun)
-
-print(f"[Debug] 1 M time unit = {T_unit_sec:.6f} seconds")
-
-# 2. 设定总时长 (1年)
-target_years = 0.5
-target_seconds = target_years * SEC_PER_YEAR
-
-# 3. 换算为 M 单位
-# 公式： 物理时间 / (1M对应的秒数)
-total_duration_M = target_seconds / T_unit_sec 
-
-# 打印验证 (应该是 6.4e6 左右)
-print(f"[Debug] Total Duration: {target_years} years = {target_seconds:.2e} s = {total_duration_M:.2e} M")
-
-# 分块大小 (10万 M 一块)
-chunk_size_M = 100000.0  
-dt_M = 0.05        
-print(f"[Setup] Chunk Size: {chunk_size_M} M, Time Step: {dt_M} M")          
-# -----------------------------------------------------------------------------
-# 2. 主程序
-# -----------------------------------------------------------------------------
-def run_chunked_wave_generation():
-    print("=== EMRI Chunked Waveform Generation ===")
-
-    # --- A. 参数设置 ---
-    M_BH = 1e6        # M_sun
-    mu_Obj = 10.0     # M_sun
-    a_spin = 0.1
+@dataclass
+class CppTrajectoryAdapter:
+    """Adapter to make C++ vector data look like Python objects"""
+    t: np.ndarray
+    p: np.ndarray
+    e: np.ndarray
+    iota: np.ndarray
+    r_over_M: np.ndarray
+    theta: np.ndarray
+    phi: np.ndarray
+    psi: np.ndarray
+    chi: np.ndarray
     
-    p0, e0, iota0_deg = 10.0, 0.3, 60.0
-    iota0 = np.radians(iota0_deg)
-    
-    # # 演化设置
-    # total_duration_M = 0.5*3600.0*24.0*365.0*C_SI / (G_SI * (M_BH * M_SUN_SI))  # 总时长 (M) -> 根据需要设为 6.4e6 (1年)
-    # chunk_size_M = 500000.0       # 每次计算 1万 M (内存友好)
-    # dt_M = 1.0                   # 采样步长 (M)
+    @property
+    def r(self):
+        return self.r_over_M
 
-    # 观测者
-    dist_Gpc = 1.0
-    dist_m = dist_Gpc * 1e9 * 3.086e16
-    obs = ObserverInfo(R=dist_m, theta=np.pi/4, phi=0.0)
+def save_trajectory_to_h5(filename, cpp_states, M, mu, a):
+    """Save C++ results to HDF5"""
+    n = len(cpp_states)
+    print(f"[IO] Saving {n} steps to {filename}...")
     
-    # --- B. 初始化 ---
-    if CPP_AVAILABLE:
-        orbiter = BabakNKOrbit_CPP(M_BH, a_spin, p0, e0, iota0, mu_Obj)
-    else:
-        orbiter = BabakNKOrbit(M_BH, a_spin, p0, e0, iota0, mu=mu_Obj)
-
-    output_file = "emri_waveform_complete.h5"
-    print(f"[Output] Data will be streamed to: {output_file}")
-    
-    current_t = 0.0
-    chunk_idx = 0
-    total_steps = 0
-    
-    start_time = time.time()
-
-    # --- C. 流式计算循环 ---
-    with h5py.File(output_file, "w") as f:
-        # 1. 创建可扩展数据集 (Resizable Datasets)
-        # chunk=True 允许数据分块存储，maxshape=(None,) 允许无限扩展
-        dset_t = f.create_dataset("t", (0,), maxshape=(None,), dtype='f8', chunks=True)
-        dset_h_plus = f.create_dataset("h_plus", (0,), maxshape=(None,), dtype='f8', chunks=True)
-        dset_h_cross = f.create_dataset("h_cross", (0,), maxshape=(None,), dtype='f8', chunks=True)
+    with h5py.File(filename, 'w') as f:
+        f.attrs['M'] = M
+        f.attrs['mu'] = mu
+        f.attrs['a'] = a
+        # Save dt if we have points, else 0
+        f.attrs['dt'] = cpp_states[1].t - cpp_states[0].t if n > 1 else 0
         
-        # 可选：也存轨道参数
-        dset_p = f.create_dataset("p", (0,), maxshape=(None,), dtype='f8', chunks=True)
-        dset_e = f.create_dataset("e", (0,), maxshape=(None,), dtype='f8', chunks=True)
+        # Create datasets with compression
+        f.create_dataset('t', data=[s.t for s in cpp_states], compression="gzip")
+        f.create_dataset('p', data=[s.p for s in cpp_states], compression="gzip")
+        f.create_dataset('e', data=[s.e for s in cpp_states], compression="gzip")
+        f.create_dataset('iota', data=[s.iota for s in cpp_states], compression="gzip")
+        f.create_dataset('r', data=[s.r for s in cpp_states], compression="gzip")
+        f.create_dataset('theta', data=[s.theta for s in cpp_states], compression="gzip")
+        f.create_dataset('phi', data=[s.phi for s in cpp_states], compression="gzip")
+        f.create_dataset('psi', data=[s.psi for s in cpp_states], compression="gzip")
+        f.create_dataset('chi', data=[s.chi for s in cpp_states], compression="gzip")
+    
+    print("[IO] Trajectory saved.")
 
-        print(f"\n[Start] Integrating {total_duration_M:.1e} M in chunks of {chunk_size_M:.1e} M...")
+def compute_waveform_io_stream(h5_filename, observer, batch_size=500000, overlap=2000):
+    """Streamed waveform calculation: Read -> Calc -> Write"""
+    print(f"[Waveform] Starting stream processing on {h5_filename}")
+    
+    with h5py.File(h5_filename, 'r+') as f:
+        M = f.attrs['M']
+        mu = f.attrs['mu']
+        total_points = f['t'].shape[0]
+        
+        if total_points < 2:
+            print("Error: Trajectory data is empty or too short!")
+            return
 
-        while current_t < total_duration_M:
-            # 决定本次演化时长 (最后一段可能不满 chunk_size)
-            this_duration = min(chunk_size_M, total_duration_M - current_t)
-            if this_duration <= 1e-5: break
+        dt = f['t'][1] - f['t'][0]
+        print(f"  Detected dt = {dt:.4f} M. Total points: {total_points}")
 
-            # --- Step 1: C++ 演化 ---
-            # orbiter 内部保持状态，这里只需调用 evolve 继续跑
-            # 注意：Python端不打印进度条，以免刷屏，C++端会有输出
-            cpp_states = orbiter.evolve(this_duration, dt_M)
+        if 'h_plus' in f:
+            print("  Overwriting existing waveform data...")
+            del f['h_plus'], f['h_cross']
             
-            n_points = len(cpp_states)
-            if n_points == 0:
-                print("\n[Stop] Evolution terminated early (Plunge or Error).")
-                break
+        dset_h_plus = f.create_dataset('h_plus', shape=(0,), maxshape=(None,), chunks=True, compression="gzip")
+        dset_h_cross = f.create_dataset('h_cross', shape=(0,), maxshape=(None,), chunks=True, compression="gzip")
+        
+        for start_idx in range(0, total_points, batch_size):
+            end_idx = min(start_idx + batch_size, total_points)
+            slice_end = min(end_idx + overlap, total_points)
             
-            # --- Step 2: 提取数据 (Zero-Copy if possible) ---
-            # 只需要波形计算用到的列
-            t_chunk = np.array([s.t for s in cpp_states])
-            p_chunk = np.array([s.p for s in cpp_states]) # 用于监测
-            e_chunk = np.array([s.e for s in cpp_states])
-            
-            # 构造 Adapter (包含 r, theta, phi 用于波形)
-            traj_chunk = TrajChunkAdapter(
-                t=t_chunk,
-                r=np.array([s.r for s in cpp_states]),
-                theta=np.array([s.theta for s in cpp_states]),
-                phi=np.array([s.phi for s in cpp_states]),
-                # 补充其他字段以防万一
-                p=p_chunk, e=e_chunk, iota=np.array([s.iota for s in cpp_states]),
-                psi=np.array([s.psi for s in cpp_states]), chi=np.array([s.chi for s in cpp_states])
+            # Safety check for small tails
+            chunk_len = slice_end - start_idx
+            if chunk_len < 4:
+                print(f"  [Warning] Skipping tiny tail batch (size {chunk_len}).")
+                continue
+
+            # Load chunk
+            traj_chunk = CppTrajectoryAdapter(
+                t=f['t'][start_idx:slice_end],
+                p=f['p'][start_idx:slice_end],
+                e=f['e'][start_idx:slice_end],
+                iota=f['iota'][start_idx:slice_end],
+                r_over_M=f['r'][start_idx:slice_end],
+                theta=f['theta'][start_idx:slice_end],
+                phi=f['phi'][start_idx:slice_end],
+                psi=f['psi'][start_idx:slice_end],
+                chi=f['chi'][start_idx:slice_end]
             )
             
-            # --- Step 3: 计算波形 ---
-            # 这一步是在 Python 中做的，会消耗内存，但仅限于这一个 Chunk
-            if len(traj_chunk.t) < 10:
-                print(f"      [Warning] Skipping tiny tail batch (size {len(traj_chunk.t)}).")
-                continue
-            hp_chunk, hc_chunk = compute_nk_waveform(traj_chunk, mu_Obj, M_BH, obs, dt_M)
+            # Compute waveform
+            hp_chunk, hc_chunk = compute_nk_waveform(traj_chunk, mu, M, observer, dt)
             
-            # --- Step 4: 写入磁盘 ---
-            # 扩展数据集大小
-            old_size = dset_t.shape[0]
-            new_size = old_size + n_points
+            # Write valid part
+            valid_len = end_idx - start_idx
+            valid_len = min(valid_len, len(hp_chunk))
             
-            dset_t.resize((new_size,))
+            current_size = dset_h_plus.shape[0]
+            new_size = current_size + valid_len
             dset_h_plus.resize((new_size,))
             dset_h_cross.resize((new_size,))
-            dset_p.resize((new_size,))
-            dset_e.resize((new_size,))
             
-            # 写入数据
-            dset_t[old_size:] = t_chunk
-            dset_h_plus[old_size:] = hp_chunk
-            dset_h_cross[old_size:] = hc_chunk
-            dset_p[old_size:] = p_chunk
-            dset_e[old_size:] = e_chunk
+            dset_h_plus[current_size:] = hp_chunk[:valid_len]
+            dset_h_cross[current_size:] = hc_chunk[:valid_len]
             
-            # --- Step 5: 状态更新 ---
-            current_t = t_chunk[-1]
-            total_steps += n_points
-            chunk_idx += 1
-            
-            # 打印简报 (覆盖 C++ 的最后一行输出)
-            sys.stdout.write(f"\r[Python Chunk {chunk_idx}] Saved {n_points} pts. p={p_chunk[-1]:.4f}, e={e_chunk[-1]:.4f}   ")
-            sys.stdout.flush()
-            
-            # 释放大数组内存 (Python 引用计数会自动回收)
-            del cpp_states, traj_chunk, hp_chunk, hc_chunk
+            print(f"  [Batch] Processed {new_size}/{total_points} ({new_size/total_points*100:.1f}%)")
 
-    # --- D. 结束 ---
-    elapsed = time.time() - start_time
-    print(f"\n\n[Done] Simulation finished in {elapsed:.2f} s.")
-    print(f"       Total steps: {total_steps}")
-    print(f"       File size: ~{total_steps * 5 * 8 / 1024 / 1024:.1f} MB")
-    print(f"       Saved to: {output_file}")
+    print("[Waveform] All done. Data saved to H5.")
 
-    # --- E. 简单验证绘图 (只读取最后一点点) ---
-    #print("[Plot] Plotting last  points check...")
-    with h5py.File(output_file, "r") as f:
-        t_last = f["t"][-500:]
-        hp_last = f["h_plus"][-500:]
+def check_existing_file(filename):
+    """Check if file exists and has valid data"""
+    if not os.path.exists(filename):
+        return False
+    try:
+        with h5py.File(filename, 'r') as f:
+            if 't' not in f or f['t'].shape[0] < 10:
+                print(f"[Setup] Existing file {filename} is empty or corrupt. Re-running evolution.")
+                return False
+            print(f"[Setup] Found valid existing file with {f['t'].shape[0]} steps.")
+            return True
+    except OSError:
+        print(f"[Setup] File {filename} is corrupt. Re-running.")
+        return False
+
+def run_production_pipeline():
+    filename = "emri_waveform_complete.h5"
+    
+    # ==========================================
+    # 1. Setup
+    # ==========================================
+    M_phys_solar = 1e6
+    mu_phys_solar = 10.0
+    a_spin = 0.7
+    p_init, e_init, iota_init = 10.0, 0.6, np.radians(30.0)
+    
+    M_kg = M_phys_solar * M_SUN_SI
+    T_unit_sec = G_SI * M_kg / (C_SI**3)
+    
+    target_years = 1.0
+    target_sec = target_years * SEC_PER_YEAR
+    total_duration_M = target_sec / T_unit_sec
+    
+    # To fix index errors, ensure dt_M isn't too small relative to duration
+    # But for 1 year run, 0.1-2.0 is fine.
+    dt_M = 0.1014826  # Using your previous specific value or set to 1.0/2.0
+    
+    print(f"=== EMRI Chunked Waveform Generation ===")
+    print(f"[Physics] M = {M_phys_solar:.1e} M_sun, mu = {mu_phys_solar:.1f} M_sun")
+    print(f"[Units] 1 M = {T_unit_sec:.4f} s")
+    print(f"[Setup] Target Duration: {target_years} Year = {target_sec:.2e} s")
+    print(f"[Setup] In Geometric Units: {total_duration_M:.2e} M")
+    print(f"[Setup] Sampling dt: {dt_M} M -> Total points ~ {int(total_duration_M/dt_M)}")
+
+    # -------------------------------------------------
+    # Step 1: Evolution (C++)
+    # -------------------------------------------------
+    # Robust check: Only skip if file exists AND has data
+    file_is_valid = check_existing_file(filename)
+
+    if not file_is_valid:
+        print("\n[1/3] Running Evolution (C++)...")
+        if not CPP_AVAILABLE:
+            raise RuntimeError("Need C++ extension for long run!")
+            
+        start_t = time.time()
+        orbiter = BabakNKOrbit_CPP(M_phys_solar, a_spin, p_init, e_init, iota_init, mu_phys_solar)
         
-        plt.figure(figsize=(10, 4))
-        plt.plot(t_last, hp_last)
-        plt.title("Waveform Tail (Last 1000 points)")
-        plt.xlabel("Time (M)")
-        plt.ylabel("h+")
-        plt.grid(True, alpha=0.3)
-        plt.savefig("chunk_wave_check.png")
-        print("[Plot] Saved chunk_wave_check.png")
+        # Run evolution
+        cpp_results = orbiter.evolve(total_duration_M, dt_M)
+        
+        print(f"[C++] Evolution finished in {time.time()-start_t:.2f} s")
+        
+        if len(cpp_results) == 0:
+            print("Error: C++ evolution returned 0 steps! Check parameters or C++ logic.")
+            return
+
+        save_trajectory_to_h5(filename, cpp_results, M_phys_solar, mu_phys_solar, a_spin)
+        
+        del cpp_results
+        del orbiter
+        import gc; gc.collect()
+    else:
+        print(f"\n[1/3] Using existing valid data from {filename}.")
+
+    # -------------------------------------------------
+    # Step 2: Waveform (IO Stream)
+    # -------------------------------------------------
+    print("\n[2/3] Computing Waveform (Streamed)...")
+    compute_waveform_io_stream(filename, ObserverInfo(1e9*3e22, np.pi/4, 0), batch_size=500000)
+    
+    # -------------------------------------------------
+    # Step 3: Plot
+    # -------------------------------------------------
+    print("\n[3/3] Plotting check...")
+    plot_results(filename, T_unit_sec)
+
+def plot_results(filename, T_unit):
+    with h5py.File(filename, 'r') as f:
+        t = f['t']
+        p = f['p']
+        e = f['e']
+        
+        total = t.shape[0]
+        if total == 0: return
+
+        fig, axes = plt.subplots(2, 1, figsize=(12, 8))
+        
+        # Downsample for plotting
+        step = max(1, total // 2000)
+        t_days = np.array(t[::step]) * T_unit / 86400.0
+        
+        axes[0].plot(t_days, p[::step], label='p')
+        axes[0].set_ylabel('p/M')
+        axes[0].set_xlabel('Time (Days)')
+        axes[0].set_title("Long-term Evolution")
+        ax0r = axes[0].twinx()
+        ax0r.plot(t_days, e[::step], color='orange', label='e', linestyle='--')
+        ax0r.set_ylabel('Eccentricity')
+        
+        # Plot waveform if exists
+        if 'h_plus' in f:
+            h = f['h_plus']
+            view_len = 2000
+            start = max(0, h.shape[0] - view_len)
+            t_wave = np.array(t[start:start+view_len]) * T_unit
+            h_wave = np.array(h[start:start+view_len])
+            
+            if len(h_wave) > 0:
+                axes[1].plot(t_wave - t_wave[0], h_wave)
+                axes[1].set_ylabel("Strain")
+                axes[1].set_title("Waveform (Tail)")
+        
+        plt.tight_layout()
+        plt.savefig("Chunked_Result.png")
+        print("[Plot] Saved Chunked_Result.png")
 
 if __name__ == "__main__":
-    run_chunked_wave_generation()
+    run_production_pipeline()

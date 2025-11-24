@@ -56,12 +56,17 @@ BabakNKOrbit::BabakNKOrbit(double M, double a, double p, double e, double iota, 
     
     // 初始化状态
     m_t = 0.0;
-    m_p = p;
-    m_e = e;
-    m_iota = iota;
+    m_p = p0 = p;      
+    m_e = e0 = e;      
+    m_iota = iota0 = iota; 
     m_psi = 0.0;
     m_chi = 0.0;
     m_phi = 0.0;
+
+    // [新增] 初始化缓存为 0 (表示第一次需要冷启动)
+    cached_E = 0.0;
+    cached_Lz = 0.0;
+    cached_Q = 0.0;
 }
 
 OrbitState BabakNKOrbit::get_current_state() const {
@@ -342,11 +347,23 @@ int BabakNKOrbit::gsl_derivs(double t, const double y[], double dydt[], void* pa
         de_dt = f.de_dt;
         diota_dt = f.diota_dt;
     }
+    BabakNKOrbit* orbit = static_cast<BabakNKOrbit*>(p->orbit_ptr);
     
-    // 3. 计算 Geodesic Motion
-    KerrConstants ck = get_conserved_quantities(M, a, cp, ce, ci);
+    // 传入 cached_E, cached_Lz, cached_Q 作为猜测值
+    KerrConstants ck = orbit->get_conserved_quantities(M, a, cp, ce, ci, 
+                                                       orbit->cached_E, 
+                                                       orbit->cached_Lz, 
+                                                       orbit->cached_Q);
+    // // 3. 计算 Geodesic Motion
+    // KerrConstants ck = get_conserved_quantities(M, a, cp, ce, ci);
     if (ck.E == 0.0) return GSL_EFAILED; // Mapping 失败
 
+
+    // 更新缓存！这样下一次微步 (micro-step) 就能用到这次的精确值
+    // 即使 GSL 拒绝了这一步，这个近似值对于附近的点通常也比 Schwarzschild 猜测要好
+    orbit->cached_E = ck.E;
+    orbit->cached_Lz = ck.Lz;
+    orbit->cached_Q = ck.Q;
     double r = cp / (1.0 + ce * cos(cpsi));
     double z = ck.z_minus * pow(cos(cchi), 2);
     double Delta = r*r - 2.0*r + a*a;

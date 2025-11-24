@@ -50,12 +50,16 @@ public:
 
     // 获取当前状态 (用于调试或断点保存)
     OrbitState get_current_state() const;
+    double p0, e0, iota0;
+    double cached_E = 0.0;
+    double cached_Lz = 0.0;
+    double cached_Q = 0.0;
 
 private:
     double M_phys; 
     double mu_phys;
     double a_spin;
-    double p0, e0, iota0;
+    
     bool do_inspiral;
 
     double m_t;
