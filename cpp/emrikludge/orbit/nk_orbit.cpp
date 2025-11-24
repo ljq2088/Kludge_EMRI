@@ -509,13 +509,12 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt_sampling
     // 预估容量
     size_t est_steps = static_cast<size_t>(duration / dt_sampling);
     traj.reserve(est_steps + 1000);
-    
     // GSL 系统配置
     // 维度=6: p, e, iota, psi, chi, phi
     GSLParams params;
     params.M = 1.0;
     params.a = a_spin;
-    params.mu = mu_phys / M_phys; // 🛡️ 再次确保这里是质量比
+    params.mu = mu_phys / M_phys; 
     params.do_inspiral = do_inspiral;
     params.orbit_ptr = this;
 
@@ -535,10 +534,11 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt_sampling
     gsl_odeiv2_evolve * e = gsl_odeiv2_evolve_alloc(6);
 
     // 初始状态
-    double t = 0.0;
+    double t = m_t; // 从上次的时间点继续
     double t1 = duration;
     double h = 1e-3; // 初始试探步长 (GSL 会自动调整)
-    double y[6] = {p0, e0, iota0, 0.0, 0.0, 0.0};
+    //double y[6] = {p0, e0, iota0, 0.0, 0.0, 0.0};
+    double y[6] = {m_p, m_e, m_iota, m_psi, m_chi, m_phi};
 
     // 打印进度控制
     double last_print_t = 0;
@@ -599,7 +599,20 @@ cleanup:
     gsl_odeiv2_evolve_free(e);
     gsl_odeiv2_control_free(c);
     gsl_odeiv2_step_free(s);
-    
+    // --- [新增] 保存当前状态，以便下次继续演化 ---
+    // y[] 数组里存的是最后的积分状态
+    m_p = y[0];
+    m_e = y[1];
+    m_iota = y[2];
+    m_psi = y[3];
+    m_chi = y[4];
+    m_phi = y[5];
+    m_t = t; // 更新内部时间
+    int status = gsl_odeiv2_evolve_apply(e, c, s, &sys, &t, t_next, &h, y);
+    // 如果因为 Plunge 停止，可以重置或标记，防止下次继续算
+    if (status == GSL_EDOM) {
+        do_inspiral = false; // 停止演化
+    }
     return traj;
 }
 } // namespace
