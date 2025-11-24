@@ -58,7 +58,31 @@ ext_modules = [
         ],
     ),
 ]
+# setup.py 修改建议
 
+# ...
+def customize_compiler_for_nvcc(compiler):
+    # 这是一个简化的 hook，用于把 .cu 文件传给 nvcc
+    # 在实际生产中通常比较复杂，或者直接用 CMake
+    pass 
+
+# 或者，最务实的做法：使用 CMake 构建 (pybind11 官方推荐)
+# 但为了保持你现有的 setup.py 结构，可以在 Extension 中添加库
+nk_module = Extension(
+    'emrikludge._emrikludge',
+    sources=[
+        'cpp/emrikludge/gpu/nk_kernel.cu',  # 新增
+        'cpp/emrikludge/gpu/nk_gpu_manager.cpp', # 新增
+        # ... 原有的 cpp 文件 ...
+    ],
+    include_dirs=[
+        'cpp/emrikludge',
+        '/usr/local/cuda/include' # 确保包含 CUDA 头文件
+    ],
+    library_dirs=['/usr/local/cuda/lib64'],
+    libraries=['cudart'], # 链接 CUDA Runtime
+    # ...
+)
 # -------------------------------------------------------------------------
 # Setup 主函数
 # -------------------------------------------------------------------------

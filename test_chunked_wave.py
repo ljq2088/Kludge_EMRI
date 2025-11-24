@@ -134,19 +134,36 @@ def compute_waveform_io_stream(h5_filename, observer, batch_size=500000, overlap
     print("[Waveform] All done. Data saved to H5.")
 
 def check_existing_file(filename):
-    """Check if file exists and has valid data"""
+    """检查文件是否存在，如果存在则询问用户是否删除"""
     if not os.path.exists(filename):
+        print(f"[Setup] File {filename} does not exist. Will create new.")
         return False
+    
+    # 文件存在，询问用户
     try:
         with h5py.File(filename, 'r') as f:
-            if 't' not in f or f['t'].shape[0] < 10:
-                print(f"[Setup] Existing file {filename} is empty or corrupt. Re-running evolution.")
-                return False
-            print(f"[Setup] Found valid existing file with {f['t'].shape[0]} steps.")
-            return True
+            step_count = f['t'].shape[0] if 't' in f else 0
+            print(f"[Setup] Found existing file with {step_count} steps: {filename}")
     except OSError:
-        print(f"[Setup] File {filename} is corrupt. Re-running.")
-        return False
+        print(f"[Setup] Found existing but corrupt file: {filename}")
+    
+    # 询问用户操作
+    while True:
+        response = input(f"Do you want to delete {filename} and regenerate? (y/n): ").strip().lower()
+        
+        if response in ['y', 'yes']:
+            # 用户选择删除文件
+            os.remove(filename)
+            print(f"[Setup] Deleted existing file: {filename}")
+            return False  # 返回False表示需要重新生成
+            
+        elif response in ['n', 'no']:
+            # 用户选择不删除，使用现有文件
+            print(f"[Setup] Using existing file: {filename}")
+            return True  # 返回True表示使用现有文件
+            
+        else:
+            print("Please enter 'y' for yes or 'n' for no.")
 
 def run_production_pipeline():
     filename = "emri_waveform_complete.h5"
