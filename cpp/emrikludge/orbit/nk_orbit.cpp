@@ -574,7 +574,13 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt_sampling
         KerrConstants k = get_conserved_quantities(1.0, a_spin, y[0], y[1], y[2]);
         double r_val = y[0] / (1.0 + y[1] * cos(y[3]));
         double z_val = k.z_minus * pow(cos(y[4]), 2);
-        double theta_val = acos(sqrt(max(0.0, z_val)));
+        double cos_theta = sqrt(std::max(0.0, k.z_minus)) * cos(y[4]);
+
+        // 防止浮点数误差导致 acos 越界
+        if (cos_theta > 1.0) cos_theta = 1.0;
+        if (cos_theta < -1.0) cos_theta = -1.0;
+
+        double theta_val = acos(cos_theta);
         
         traj.push_back({t, y[0], y[1], y[2], y[3], y[4], y[5], r_val, theta_val});
         

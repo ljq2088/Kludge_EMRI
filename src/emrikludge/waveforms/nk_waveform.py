@@ -2,7 +2,8 @@
 
 import numpy as np
 from dataclasses import dataclass
-from scipy.interpolate import CubicSpline  # <--- 新增
+# from scipy.interpolate import CubicSpline 
+from scipy.interpolate import make_interp_spline 
 # 常数定义
 G_SI = 6.67430e-11
 C_SI = 299792458.0
@@ -25,15 +26,13 @@ def get_minkowski_trajectory(trajectory):
     y = r * sin_theta * np.sin(phi)
     z = r * np.cos(theta)
     return np.stack([x, y, z], axis=0)
-def compute_derivative_spline(t, y):
+def compute_derivative_spline(t, y, order=1):
     """
-    使用三次样条插值计算导数。
-    比 np.gradient 更精准，尤其适合高阶导数。
+    使用五次样条 (k=5) 计算导数，确保高阶导数光滑。
     """
-    # 创建样条曲线
-    cs = CubicSpline(t, y)
-    # 返回一阶导数
-    return cs(t, 1)
+    # k=5 (Quintic) 保证 2 阶和 3 阶导数都是光滑的
+    spl = make_interp_spline(t, y, k=5)
+    return spl.derivative(order)(t)
 def compute_nk_waveform(trajectory, mu_phys, M_phys, observer: ObserverInfo, dt_M):
     """
     计算波形。
@@ -75,35 +74,32 @@ def compute_nk_waveform(trajectory, mu_phys, M_phys, observer: ObserverInfo, dt_
     # 这里需要 v，我们先算 v
     v_vec = np.zeros_like(x_vec)
     for i in range(3):
-        v_vec[i] = compute_derivative_spline(t_grid, x_vec[i])
+        v_vec[i] = compute_derivative_spline(t_grid, x_vec[i], order=1)
         
     S_tensor = q * np.einsum('it,jt,kt->ijkt', v_vec, x_vec, x_vec)
     
-    # --- 对多极矩求导 ---
+    # --- 对多极矩求导 (全部换成 k=5 的平滑求导) ---
     
     # I_ij 需要 2 阶导 (d2_I)
     d2_I = np.zeros_like(I_tensor)
     for i in range(3):
         for j in range(3):
-            # 这里的 Spline 是一次构建多次求导，效率很高
-            cs_I = CubicSpline(t_grid, I_tensor[i, j])
-            d2_I[i, j] = cs_I(t_grid, 2) # 直接求 2 阶导
+            # 使用封装好的函数，或者直接调用 make_interp_spline
+            d2_I[i, j] = compute_derivative_spline(t_grid, I_tensor[i, j], order=2)
 
     # S_ijk 需要 2 阶导 (d2_S)
     d2_S = np.zeros_like(S_tensor)
     for i in range(3):
         for j in range(3):
             for k in range(3):
-                cs_S = CubicSpline(t_grid, S_tensor[i, j, k])
-                d2_S[i, j, k] = cs_S(t_grid, 2)
+                d2_S[i, j, k] = compute_derivative_spline(t_grid, S_tensor[i, j, k], order=2)
 
-    # M_ijk 需要 3 阶导 (d3_M)
+    # M_ijk 需要 3 阶导 (d3_M) -- 这里的提升最明显
     d3_M = np.zeros_like(M_tensor)
     for i in range(3):
         for j in range(3):
             for k in range(3):
-                cs_M = CubicSpline(t_grid, M_tensor[i, j, k])
-                d3_M[i, j, k] = cs_M(t_grid, 3)
+                d3_M[i, j, k] = compute_derivative_spline(t_grid, M_tensor[i, j, k], order=3)
     
     # 6. 组装 h_ij
     sin_T = np.sin(observer.theta)
