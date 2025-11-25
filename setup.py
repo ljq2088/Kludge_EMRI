@@ -33,7 +33,25 @@ ext_modules = [
         name="emrikludge._emrikludge",
         
         # 源文件列表
-        sources=cpp_sources,
+        sources=[
+    # Bindings (注意顺序，虽然编译不分先后)
+    "cpp/emrikludge/bindings/bindings_module.cpp", # <--- 新的总入口
+    # "cpp/emrikludge/bindings/bindings_common.cpp",
+    "cpp/emrikludge/bindings/bindings_nk.cpp",
+    "cpp/emrikludge/bindings/bindings_aak.cpp",
+    # "cpp/emrikludge/bindings/bindings_ak.cpp",
+    # "cpp/emrikludge/bindings/bindings_tdi.cpp",
+    
+    # Core Logic
+    "cpp/emrikludge/emri_params.cpp",
+    "cpp/emrikludge/constants.cpp",
+    "cpp/emrikludge/orbit/nk_orbit.cpp",
+    "cpp/emrikludge/orbit/aak_orbit.cpp", # <--- 确保包含
+    "cpp/emrikludge/waveform/nk_waveform.cpp",
+    "cpp/emrikludge/waveform/aak_waveform.cpp",
+    "cpp/emrikludge/numrec/numrec.cpp",
+    # ...
+],
         
         # 头文件搜索路径
         include_dirs=[
