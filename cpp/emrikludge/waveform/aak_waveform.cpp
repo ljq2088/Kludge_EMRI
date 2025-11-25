@@ -1,35 +1,58 @@
 #include "aak_waveform.hpp"
 #include <cmath>
 #include <vector>
+#include <algorithm>
 #include <gsl/gsl_sf_bessel.h>
 
 namespace emrikludge {
 
-// 辅助：计算 Peters-Mathews 谐波系数 (a, b, c)
-// 来源: Barack & Cutler 2004 Eq. (43)
-// n: harmonic number
-// e: eccentricity
-// gam: Bessel J_n(ne)
+// Peters-Mathews 系数结构体
 struct PMCoeffs {
-    double a, b, c;
+    double a; // 对应 m=2 的 cos 分量
+    double b; // 对应 m=2 的 sin 分量
+    double c; // 对应 m=0 的低频分量
 };
 
-PMCoeffs compute_pm_coeffs(int n, double e) {
-    double ne = n * e;
+// 计算 Peters-Mathews 系数 (Barack & Cutler 2004 Eq. 43)
+// 注意：这里的 n 是径向谐波阶数
+PMCoeffs compute_pm_coeffs_exact(int n, double e) {
+    // 1. 处理 n=0 的特殊情况 (避免 0/0)
+    if (n == 0) {
+        // 当 n=0 时，J_0(0)=1, 其他 J_k(0)=0
+        // a = 0, b = 0, c = 2*J_0(0) = 2.0
+        return {0.0, 0.0, 2.0};
+    }
+
+    // 2. 贝塞尔函数参数: x = n * e
+    double x = n * e;
+    
     // 我们需要 J_{n-2}, J_{n-1}, J_n, J_{n+1}, J_{n+2}
-    // GSL array 计算更高效，但这里简单起见分别调用
-    double jn   = gsl_sf_bessel_Jn(n, ne);
-    double jnm1 = gsl_sf_bessel_Jn(n - 1, ne);
-    double jnm2 = gsl_sf_bessel_Jn(n - 2, ne);
-    double jnp1 = gsl_sf_bessel_Jn(n + 1, ne);
-    double jnp2 = gsl_sf_bessel_Jn(n + 2, ne);
+    // 使用 GSL 的递推计算比多次调用更高效且稳健
+    // 但是 GSL 的 array 函数要求 n_min >= 0。由于 n 可以是负数，利用 J_{-n}(x) = (-1)^n J_n(x) 转换
+    
+    auto get_bessel = [&](int k, double arg) {
+        int abs_k = std::abs(k);
+        double val = gsl_sf_bessel_Jn(abs_k, arg);
+        if (k < 0 && (abs_k % 2 != 0)) val = -val; // J_{-n} = (-1)^n J_n
+        return val;
+    };
+
+    double jn   = get_bessel(n, x);
+    double jnm1 = get_bessel(n - 1, x);
+    double jnm2 = get_bessel(n - 2, x);
+    double jnp1 = get_bessel(n + 1, x);
+    double jnp2 = get_bessel(n + 2, x);
 
     PMCoeffs res;
-    // Eq 43a
-    res.a = -n * jnm2 + 2.0 * n * e * jnm1 - 2.0 * jn - 2.0 * n * e * jnp1 + n * jnp2;
-    // Eq 43b
-    res.b = -n * sqrt(1.0 - e * e) * (jnm2 - 2.0 * jn + jnp2);
-    // Eq 43c
+    
+    // Eq 43a: A_n = -n [ J(n-2) - 2e J(n-1) + (2/n)J(n) + 2e J(n+1) - J(n+2) ]
+    // 展开化简 (2/n)*J(n)*(-n) = -2 J(n)
+    res.a = -n * (jnm2 - 2.0*e*jnm1 + 2.0*e*jnp1 - jnp2) - 2.0 * jn;
+    
+    // Eq 43b: B_n = -n * sqrt(1-e^2) [ J(n-2) - 2J(n) + J(n+2) ]
+    res.b = -n * sqrt(1.0 - e*e) * (jnm2 - 2.0*jn + jnp2);
+    
+    // Eq 43c: C_n = 2 J(n)
     res.c = 2.0 * jn;
     
     return res;
@@ -51,21 +74,12 @@ generate_aak_waveform_cpp(
     std::vector<double> h_plus(N, 0.0);
     std::vector<double> h_cross(N, 0.0);
 
-    // 几何常数
-    // 假设距离 dist 已经是几何单位，或者在外部处理了单位
-    // 如果 dist 是 Gpc，这里需要转换因子。
-    // 我们的约定：C++ 内部尽可能处理无量纲或几何单位。
-    double amp_scale = mu / dist;
+    double amp_scale = mu / dist; 
 
-    // 观测角度 (Sky position of Source)
-    // Barack & Cutler 使用 (theta_S, phi_S)
-    double cost = cos(viewing_theta);
-    double sint = sin(viewing_theta);
-    double cosp = cos(viewing_phi);
-    double sinp = sin(viewing_phi);
-
-    // 谐波截断
-    int n_max = 10; 
+    // 观测角度因子 (Source frame polarization basis)
+    // 注意：AAK 通常在源坐标系计算 h+, hx，然后由 TDI 模块处理投影。
+    // 这里我们只计算 Source Frame 的 h+, hx。
+    // viewing_phi 影响相位延迟。
 
     for (size_t i = 0; i < N; ++i) {
         if (p[i] < 3.0) continue;
@@ -74,51 +88,60 @@ generate_aak_waveform_cpp(
         double p_val = p[i];
         double iota_val = iota[i];
         
-        // 轨道频率 (Mean motion in flat space)
-        // omega = (M / a^3)^0.5 = (1-e^2)^1.5 * p^-1.5
+        // 计算轨道频率 (Mean Motion)
         double Y = 1.0 - e_val*e_val;
         double n_kepler = pow(Y, 1.5) * pow(p_val, -1.5); 
         
-        // AAK 振幅基准: sqrt(8*pi/5) * (mu/D) * (M*omega)^(2/3) -> 简化为 (M*n)^(2/3)
+        // 基础振幅 (Barack & Cutler 2004 Eq 42 前缀)
+        // H ~ (mu/D) * (M * n)^(2/3)
         double h_amp = amp_scale * pow(n_kepler, 2.0/3.0);
 
-        // 极化向量 (Polarization Tensors)
-        // 我们需要将轨道坐标系 (L // z) 旋转到波坐标系
-        // 这是一个复杂的旋转。为了 MVP，我们使用简单的 "Face-on" 或 "Edge-on" 近似公式，
-        // 或者直接使用 Peters-Mathews 的 Plus/Cross 定义 (假设视线方向合适)
-        
+        // 极化几何因子
         double cosi = cos(iota_val);
-        double sini = sin(iota_val);
+        double ap = 1.0 + cosi*cosi; // (1 + cos^2 i)
+        double ac = 2.0 * cosi;      // (2 cos i)
+        double sp = 1.0 - cosi*cosi; // (sin^2 i) = (1 - cos^2 i)
+
+        // === 谐波求和 (Barack & Cutler Eq 42) ===
+        // h+ = -A+ Sum [ a cos(Phi_m2) - b sin(Phi_m2) ] + S+ Sum [ c cos(Phi_m0) ]
+        // hx = +Ax Sum [ b cos(Phi_m2) + a sin(Phi_m2) ]
         
-        // 循环谐波 n
-        // 频率: omega_n = 2*Omega_phi + n*Omega_r (Dominant quadrupole)
-        // 相位: Phi_n = 2*Phi_phi + n*Phi_r
-        
-        for (int n = -5; n <= 5; ++n) {
-            // 这里的 n 对应 PM 论文中的 n。
-            // 频率成分是 n * Omega_r? 
-            // 不，PM 分解是 sum_n { A_n cos(2phi - n phi_r) } (Fundamental m=2)
+        // 确定 n 的求和范围
+        // 经验公式: n_max ~ 5 / (1-e)
+        int n_max = static_cast<int>(10.0 / (1.0 - e_val + 1e-3));
+        if (n_max < 10) n_max = 10;
+        if (n_max > 50) n_max = 50; // 限制最大计算量
+
+        for (int n = -n_max; n <= n_max; ++n) {
+            PMCoeffs pm = compute_pm_coeffs_exact(n, e_val);
             
-            PMCoeffs pm = compute_pm_coeffs(n + 2, e_val); // Shift index if needed?
-            // 实际上 PM 公式中 n 是相对于 2*phi 的偏移。
-            // 让我们严格遵循 Barack & Cutler Eq 42:
-            // h = sum A_n cos( 2*Phi_phi - n*Phi_r )
+            // 忽略太小的项 (性能优化)
+            if (std::abs(pm.a) < 1e-9 && std::abs(pm.b) < 1e-9 && std::abs(pm.c) < 1e-9) continue;
+
+            // 1. 四极矩项 (m=2): 频率 2*Phi_phi + n*Phi_r
+            // 注意：BC04 中相位定义为 2*gamma - n*lambda. 
+            // 对应我们的 2*Phi_phi - n*Phi_r.
+            double phase_m2 = 2.0 * Phi_phi[i] - n * Phi_r[i];
+            double wave_phase_m2 = phase_m2 - 2.0 * viewing_phi;
             
-            double phase = 2.0 * Phi_phi[i] - n * Phi_r[i];
+            double c2 = cos(wave_phase_m2);
+            double s2 = sin(wave_phase_m2);
             
-            // 极化模式 (Simplified BC04)
-            // H+ ~ - (1 + cos^2 i) [ a cos(2gamma) - b sin(2gamma) ] + (1-cos^2 i) c
-            // Hx ~ 2 cos i [ b cos(2gamma) + a sin(2gamma) ]
-            // 这里的 2gamma 就是我们的 phase
+            // 2. 低频记忆项 (m=0): 频率 n*Phi_r
+            // 注意：c_n 项的相位是 n*lambda (即 n*Phi_r)
+            double phase_m0 = n * Phi_r[i]; 
+            // m=0 项不受 viewing_phi 影响 (轴对称)
+            double c0 = cos(phase_m0);
             
-            double cos_phase = cos(phase);
-            double sin_phase = sin(phase);
-            
-            double term_plus = -(1.0 + cosi*cosi) * (pm.a * cos_phase - pm.b * sin_phase) + (1.0 - cosi*cosi) * pm.c;
-            double term_cross = 2.0 * cosi * (pm.b * cos_phase + pm.a * sin_phase);
-            
-            h_plus[i]  += h_amp * term_plus;
-            h_cross[i] += h_amp * term_cross;
+            // 累加 h+
+            // Term 1 (m=2): -(1+cos^2)*[a*cos - b*sin]
+            h_plus[i] -= h_amp * ap * (pm.a * c2 - pm.b * s2);
+            // Term 2 (m=0): +(1-cos^2)*c*cos
+            h_plus[i] += h_amp * sp * pm.c * c0;
+
+            // 累加 hx
+            // Term 1 (m=2 only): +2cos*[b*cos + a*sin]
+            h_cross[i] += h_amp * ac * (pm.b * c2 + pm.a * s2);
         }
     }
 
