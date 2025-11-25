@@ -174,7 +174,7 @@ def run_production_pipeline():
     M_phys_solar = 1e6
     mu_phys_solar = 10.0
     a_spin = 0.7
-    p_init, e_init, iota_init = 10.0, 0.8, np.radians(30.0)
+    p_init, e_init, iota_init = 10.0, 0.2, np.radians(30.0)
     
     M_kg = M_phys_solar * M_SUN_SI
     T_unit_sec = G_SI * M_kg / (C_SI**3)

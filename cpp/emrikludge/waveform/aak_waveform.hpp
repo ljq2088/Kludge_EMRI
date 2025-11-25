@@ -12,8 +12,21 @@
 #include "../emri_params.hpp"
 
 namespace emrikludge {
+    std::pair<std::vector<double>, std::vector<double>> 
+generate_aak_waveform_cpp(
+    const std::vector<double>& t,
+    const std::vector<double>& p,
+    const std::vector<double>& e,
+    const std::vector<double>& iota,
+    const std::vector<double>& Phi_r,
+    const std::vector<double>& Phi_th,
+    const std::vector<double>& Phi_phi,
+    double M, double mu, double dist,
+    double viewing_theta, double viewing_phi
+);
     AAKWaveformResult compute_aak_waveform_cpu(const EMRIParams& emri, 
         const WaveformConfig& wf_conf);
+    
 // 声明函数
 // AAKWaveformResult compute_aak_waveform_cpu(const EMRIParams& emri, 
 //                                            const WaveformConfig& wf_conf);
