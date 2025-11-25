@@ -66,7 +66,7 @@ def test_true_aak():
     # 3. 关键检查 II: AAK 轨道演化 (Flux + Map + Phase)
     # ------------------------------------------
     duration = 50000.0 # M (几何单位时长，约 5000 秒 / 1.4 小时)
-    dt = 10.0 # M (步长可以比 NK 大，因为 AAK 是解析的，只要能捕捉参数变化即可)
+    dt = 0.1 # M (步长可以比 NK 大，因为 AAK 是解析的，只要能捕捉参数变化即可)
     
     print(f"\n[Step 2] Evolving AAK Orbit (Duration={duration} M)...")
     t0 = time.time()
@@ -158,7 +158,7 @@ def test_true_aak():
     
     # 频率/相位检查 (画一下 cos(phase) 看是否平滑)
     # Zoom in to first few cycles
-    zoom_idx = 1000 # 前 1000 个点
+    zoom_idx = 1000
     if len(t_vec) < zoom_idx: zoom_idx = len(t_vec)
     
     axes[1].plot(t_vec[:zoom_idx], np.cos(phiphi_vec[:zoom_idx]), label=r'$\cos(\Phi_\phi)$')
