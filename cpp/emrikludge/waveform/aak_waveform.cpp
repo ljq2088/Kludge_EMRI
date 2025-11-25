@@ -26,7 +26,7 @@ PMCoeffs compute_pm_coeffs(int n, double e) {
 
     PMCoeffs res;
     // Eq 43a
-    res.a = -n * (jnm2 - 2.0 * e * jnm1 + (2.0 / n) * jn + 2.0 * e * jnp1 - jnp2);
+    res.a = -n * jnm2 + 2.0 * n * e * jnm1 - 2.0 * jn - 2.0 * n * e * jnp1 + n * jnp2;
     // Eq 43b
     res.b = -n * sqrt(1.0 - e * e) * (jnm2 - 2.0 * jn + jnp2);
     // Eq 43c
