@@ -38,6 +38,7 @@ ext_modules = [
         # 头文件搜索路径
         include_dirs=[
             # 允许代码中使用 #include "orbit/nk_orbit.hpp" 这种相对路径
+            "cpp",
             "cpp/emrikludge", 
             # pybind11 的头文件路径
             pybind11.get_include(),

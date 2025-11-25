@@ -1,7 +1,13 @@
 #include "nk_orbit.hpp" 
+#include "aak_orbit.hpp"
 #include "kerr_freqs.hpp" 
-#include "aak_map.hpp"    
-// ...
+#include "aak_map.hpp" 
+#include <iostream>
+#include <cmath>
+#include <algorithm>
+#include <stdexcept>
+#include <cstdio> 
+#include <array>   
 
 std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
     // ...
@@ -21,24 +27,14 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
         
         // 4. 映射到 AK 参数 (Step 2: The Map)
         double p_ak, e_ak, i_ak;
+        // 传入当前的物理参数 p, e, iota 作为参考
         AAKMap::find_ak_parameters(1.0, a, kf.Omega_r, kf.Omega_theta, kf.Omega_phi, 
+                                   p, e, iota, 
                                    p_ak, e_ak, i_ak);
         
-        // *Fallback*: 如果 Map 没算出来，直接用物理参数 (Semi-relativistic approximation)
-        if (p_ak == 0.0) { p_ak = p; e_ak = e; i_ak = iota; }
-
-        // 5. 累积相位 (注意: kf.Omega 是 dPhi/dMinoTime ? 还是 dPhi/dt ?)
-        // KerrFreqs 计算的是 Upsilon (Mino frequencies).
-        // 需要除以 Gamma (time dilation) 转换成 dPhi/dt
-        // dPhi/dt = Upsilon / Gamma
-        double dt_dtau = kf.Gamma; 
-        // 如果 kf.Gamma 还没实现好，暂时假设它归一化了或者用 Coordinate Time Freqs
-        // 假设 KerrFreqs 返回的是 Coordinate time frequencies (dPhi/dt)
-        
-        m_Phi_r     += kf.Omega_r * dt;
-        m_Phi_theta += kf.Omega_theta * dt;
-        m_Phi_phi   += kf.Omega_phi * dt;
-        
+        // 存储状态 (存 p_ak 还是 p_phys? 为了波形生成，存 p_ak)
+        // 但为了查看轨迹，可能也想存 p_phys。
+        // 这里我们存 p_ak，因为它是波形生成的直接输入
         traj.push_back({t, p_ak, e_ak, i_ak, m_Phi_r, m_Phi_theta, m_Phi_phi});
         
         t += dt;

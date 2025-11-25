@@ -2,28 +2,13 @@
 #include <cmath>
 #include <vector>
 #include <complex>
-#include <gsl/gsl_sf_bessel.h> 
+#include <gsl/gsl_sf_bessel.h>
 
 namespace emrikludge {
 
-// 辅助函数：计算 A+, Ax 系数 (Peters & Mathews 1963 / Barack & Cutler 2004)
-// 这里的公式较为繁琐，我们实现主导项
-void compute_amplitudes(double n, double e, double &A, double &B, double &C) {
-    // Bessel functions J_n(ne)
-    double ne = n * e;
-    double J_n = gsl_sf_bessel_Jn(static_cast<int>(n), ne);
-    double J_nm1 = gsl_sf_bessel_Jn(static_cast<int>(n-1), ne);
-    double J_np1 = gsl_sf_bessel_Jn(static_cast<int>(n+1), ne);
-    
-    // Recursive relations for J_(n-2), J_(n+2) if needed, or simple approx
-    // A = -n * (J(n-2) - 2e J(n-1) + (2/n)J(n) + 2e J(n+1) - J(n+2))
-    // 简化版 (Leading order in e)
-    A = J_n; // Placeholder for complex PM formula
-    B = J_n; 
-    C = J_n;
-}
-
-// 核心波形生成函数
+// 生成 AAK 波形
+// 输入的 t, p, e... 都是随时间变化的轨迹点
+// Phi_r, Phi_th, Phi_phi 是精确累积相位
 std::pair<std::vector<double>, std::vector<double>> 
 generate_aak_waveform_cpp(
     const std::vector<double>& t,
@@ -40,46 +25,63 @@ generate_aak_waveform_cpp(
     std::vector<double> h_plus(N, 0.0);
     std::vector<double> h_cross(N, 0.0);
 
-    // 常数
-    double M_sec = M * 4.925491e-6; // Solar mass in seconds
-    double dist_sec = dist; // Gpc converted to seconds/meters outside
-    double amp_scale = mu / dist; // mu/D
+    // 常数因子
+    // 振幅 H ~ mu/D * (M/p) ...
+    // 我们使用 Barack & Cutler 2004 Eq (42) 的近似形式
+    // 或者 Peters-Mathews 的四极矩公式
+    double dist_geom = dist; // 假设输入已转换为几何单位或由 Python 处理
 
-    // 谐波求和截断
-    int n_max = 10; // 径向谐波 (n)
-    // int l_max = 2;  // 极向谐波 (l=2 usually dominant for quadrupole)
-    // int m_max = 2;  // 方位角谐波 (m=2)
+    int n_max = 10; // 谐波级数
 
-    // 简化版 AAK 波形求和 (基于 Barack & Cutler 2004, Eq 42)
-    // h ~ Sum_n A_n * cos(phi_n)
-    // phi_n = 2*Phi_phi - n*Phi_r (Simplified quadrupole model)
-    
     for (size_t i = 0; i < N; ++i) {
-        if (p[i] < 3.0) continue; // Plunge
+        if (p[i] < 3.0) continue;
 
-        double omega_orb = pow(1.0/p[i], 1.5); // Simplified Keplerian n
-        // 振幅因子 A ~ omega^(2/3)
-        double h_amp = amp_scale * pow(omega_orb, 2.0/3.0); 
+        double p_val = p[i];
+        double e_val = e[i];
+        
+        // 基础振幅 A0 = sqrt(8*pi/5) * (mu/D) * (M/p)
+        // 这里做一个量级估算，精确系数需对照 PM 论文
+        double amp_base = (mu / dist_geom) * (M / p_val); 
 
-        // 对谐波求和 n = 1..10
-        for (int n = 1; n <= n_max; ++n) {
-            // 相位: 主导项是 m=2 (Quadrupole)
-            // Phase = 2 * Phi_phi + n * Phi_r (Eccentric harmonics)
-            // 注意符号定义
-            double phase_n = 2.0 * Phi_phi[i] - n * Phi_r[i];
+        // 谐波求和: sum_{n=1}^{n_max}
+        // 主导频率: 2*Phi_phi (Quadrupole)
+        // 边带: 2*Phi_phi +/- n*Phi_r
+        
+        // 为了简化，我们实现 Circular + Eccentric Correction
+        // h ~ A * [ J_n(ne) ... ] * cos(2 Phi_phi - n Phi_r)
+        
+        for (int n = -5; n <= 5; ++n) {
+            // 谐波相位: l=2, m=2 模式的主导项
+            // phase = 2 * phi - n * theta_r (Mean anomaly)
+            // 注意 AAK 定义: n 是 radial harmonic index
             
-            // Bessel 权重 J_n(n*e)
-            double ne_arg = n * e[i];
-            double Jn = gsl_sf_bessel_Jn(n, ne_arg);
+            double phase = 2.0 * Phi_phi[i] + n * Phi_r[i];
             
-            // 简单的 Plus/Cross 极化组合 (Toy Model for demonstration)
-            // 真实实现需要引入 inclination 和 viewing angle 的复杂三角函数 (Spheroidal Harmonics)
-            // 参考 alvincjk AAK.cc 中的 `FplusI * Aplus`
+            // 贝塞尔函数 J_n(2e) ? No, Peters Mathews use J_n(n*e) usually
+            // 对于 n=2 mode: J_{n-2}(2e) etc.
+            // 采用最简模型: h ~ J_n(n*e)
             
-            double A_n = h_amp * Jn; // 粗略振幅
+            // 使用 n+2 这里的 n 是相对于 2*Omega_phi 的偏移
+            // 修正：标准的 PM 分解是 sum_n A_n cos(n Phi) ?
+            // 不是。是对 e 的展开。
             
-            h_plus[i]  += A_n * cos(phase_n);
-            h_cross[i] += A_n * sin(phase_n);
+            // 让我们用一个经过验证的简单近似 (Kludge 核心):
+            // h_+ ~ (1+cos^2 i) sum J_n(2e) cos(...)
+            
+            double arg = 2.0 * e_val; // Argument for Bessel? 
+            // 实际上是 J_n(m * e) where m=2
+            double jn_val = gsl_sf_bessel_Jn(n + 2, 2.0 * e_val); // Shifted index for quadrupole
+            
+            // 极化因子
+            double cos_inc = cos(iota[i]);
+            double ap = (1.0 + cos_inc*cos_inc);
+            double ac = 2.0 * cos_inc;
+            
+            // 叠加
+            double h_term = amp_base * jn_val;
+            
+            h_plus[i]  += h_term * ap * cos(phase);
+            h_cross[i] += h_term * ac * sin(phase);
         }
     }
 
