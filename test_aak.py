@@ -66,9 +66,14 @@ def test_true_aak():
     # 3. 关键检查 II: AAK 轨道演化 (Flux + Map + Phase)
     # ------------------------------------------
     duration = 50000.0 # M (几何单位时长，约 5000 秒 / 1.4 小时)
-    dt = 0.1 # M (步长可以比 NK 大，因为 AAK 是解析的，只要能捕捉参数变化即可)
-    
-    print(f"\n[Step 2] Evolving AAK Orbit (Duration={duration} M)...")
+    dt_sec=2.0
+    M_kg = M * M_SUN_SI
+    T_unit_sec = G_SI * M_kg / (C_SI**3)
+    dt = dt_sec/T_unit_sec # M (步长可以比 NK 大，因为 AAK 是解析的，只要能捕捉参数变化即可)
+    print(f"\n[Info] Time unit: {T_unit_sec:.4f} s (for M={M:.1e} M_sun)")
+    print(f"[Info] Evolving for {duration} M (~{duration*T_unit_sec/3600:.2f} hours) with dt={dt:.4f} M (~{dt_sec} s)") 
+    print(f"[Info] Total steps: {int(duration/dt)}")
+    print(f"[Info] Sampling dt: {dt} M (~{dt_sec} s)")
     t0 = time.time()
     
     # 初始化轨道器：传入物理参数
@@ -158,7 +163,7 @@ def test_true_aak():
     
     # 频率/相位检查 (画一下 cos(phase) 看是否平滑)
     # Zoom in to first few cycles
-    zoom_idx = 1000
+    zoom_idx = 500
     if len(t_vec) < zoom_idx: zoom_idx = len(t_vec)
     
     axes[1].plot(t_vec[:zoom_idx], np.cos(phiphi_vec[:zoom_idx]), label=r'$\cos(\Phi_\phi)$')
@@ -169,9 +174,10 @@ def test_true_aak():
     axes[1].grid(True, alpha=0.3)
     
     # 波形
-    axes[2].plot(t_vec[:zoom_idx], h_plus[:zoom_idx], label=r'$h_+$', color='black', lw=1)
-    axes[2].plot(t_vec[:zoom_idx], h_cross[:zoom_idx], label=r'$h_\times$', color='red', alpha=0.5, lw=1)
-    axes[2].set_xlabel('Time (M)')
+    time_arr = t_vec * T_unit_sec
+    axes[2].plot(time_arr[:zoom_idx], h_plus[:zoom_idx], label=r'$h_+$', color='black', lw=1)
+    axes[2].plot(time_arr[:zoom_idx], h_cross[:zoom_idx], label=r'$h_\times$', color='red', alpha=0.5, lw=1)
+    axes[2].set_xlabel('Time (s)')
     axes[2].set_ylabel('Strain')
     axes[2].set_title(f'AAK Waveform (First {zoom_idx} steps)')
     axes[2].legend()

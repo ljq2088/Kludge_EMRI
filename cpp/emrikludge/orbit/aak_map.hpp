@@ -38,13 +38,16 @@ public:
         double Y3 = Y*Y*Y;
         
         // 防止 Om_r 为 0
-        if (Om_r_ref < 1e-8) {
+        if (Om_r_ref > 1e-10) {
+            // 解析解 (对于 0PN 频率公式是精确的)
+            double term = sqrt(M) * pow(Y, 1.5) / Om_r_ref;
+            p_ak = pow(term, 2.0/3.0);
+        } else {
             p_ak = p_phys;
-            return;
         }
 
-        double p3 = M * Y3 / (Om_r_ref * Om_r_ref);
-        p_ak = pow(p3, 1.0/3.0);
+        // double p3 = M * Y3 / (Om_r_ref * Om_r_ref);
+        // p_ak = pow(p3, 1.0/3.0);
 
         // 3. 进动频率修正 (Optional)
         // 真正的 AAK 还需要计算 nu_theta, nu_phi

@@ -63,7 +63,7 @@ public:
         // A. 极向积分 <cos^2 theta>
         double Eth = gsl_sf_ellint_Ecomp(kth, GSL_PREC_DOUBLE);
         // [修复3] 这里使用了 kth2
-        double z_avg = z_minus * (1.0 + (Eth/Kth - 1.0)/(kth2)); 
+        double z_avg = z_minus * (1.0 + (Eth/Kth - 1.0)/(kth2+ 1e-15)); 
         
         // <1/(1-z)> for Phi
         double n_z = z_minus; 
@@ -73,7 +73,7 @@ public:
         // B. 径向积分 (使用数值积分替代复杂解析解)
         double sum_r2 = 0.0;
         double sum_term_phi = 0.0;
-        int N_int = 20;
+        int N_int = 500;
         double du = Kr / N_int;
         
         double h_mod = (r1-r2)/(r1-r3); // parameter h for r(u)
