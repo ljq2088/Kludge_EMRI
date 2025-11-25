@@ -126,20 +126,18 @@ KerrConstants BabakNKOrbit::get_conserved_quantities(double M, double a, double 
         Lz = L_g;
         Q = Q_g;
     } else {
-        // 否则使用 Schwarzschild 近似 (Cold Start)
-        double denom_factor = p - 3.0 - e*e;
-        if (denom_factor < 0.01) denom_factor = 0.01;
+        double sqrt_p = sqrt(p);
+        double denom_kerr = p - 3.0 - e*e+ 2.0 * a / sqrt_p;
+        if (denom_kerr < 0.01) denom_kerr = 0.01;
         
         double num_E = (p - 2.0 - 2.0*e) * (p - 2.0 + 2.0*e);
         if (num_E < 0) num_E = 0;
         
-        double E_schw = sqrt(num_E / (p * denom_factor));
-        double L_schw = p / sqrt(denom_factor);
-        
-        E = E_schw;
+        double num_L = p*p - 2.0*a*sqrt_p + a*a;
+        double L_mag = num_L / (sqrt_p * sqrt(p * denom_kerr));
         if (E < 0.1) E = 0.9;
-        Lz = L_schw * cos(iota);
-        Q = L_schw * L_schw * pow(sin(iota), 2);
+        Lz = L_mag * cos(iota);
+        Q = L_mag* L_mag * pow(sin(iota), 2);
     }
     // 2. Newton-Raphson 迭代
     const int MAX_ITER = 100;

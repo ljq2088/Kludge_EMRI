@@ -1,108 +1,89 @@
-// cpp/emrikludge/waveform/aak_waveform.cpp
-#include "waveform/aak_waveform.hpp"
+#include "aak_waveform.hpp"
+#include <cmath>
+#include <vector>
+#include <complex>
+#include <gsl/gsl_sf_bessel.h> 
 
-#include "orbit/aak_orbit.hpp"
-#include "phase/aak_phase.hpp"
-#include "lisa/lisa_orbit.hpp"
-#include "lisa/lisa_response.hpp"
-#include "utility/interpolation.hpp"
-#include "utility/integral.hpp"
-#include "orbit/aak_orbit.hpp"      // 包含 AAKOrbitTrajectory 定义
-#include "lisa/lisa_orbit.hpp"      // 包含 LISAOrbit 定义  
-#include "lisa/lisa_response.hpp"   // 包含 LISAResponse 定义
 namespace emrikludge {
 
-// AAKWaveformResult
-// compute_aak_waveform_cpu(const EMRIParams& emri,
-//                          const WaveformConfig& wf_conf)
-// {
-//     AAKWaveformResult result;
-
-//     // 1. 生成时间网格
-//     const std::size_t n_samples =
-//         static_cast<std::size_t>(emri.T / emri.dt) + 1;
-//     result.t.resize(n_samples);
-//     for (std::size_t i = 0; i < n_samples; ++i) {
-//         result.t[i] = i * emri.dt;
-//     }
-
-//     // 2. 调用 aak_orbit 计算轨道 (r(t), theta(t), phi(t))
-//     //    这里假定你在 aak_orbit.hpp/cpp 中有类似接口：
-//     //    AAKOrbitTrajectory compute_aak_orbit(const EMRIParams&, size_t n_samples);
-//     AAKOrbitTrajectory traj = compute_aak_orbit(emri, n_samples);
-
-//     // 根据需要把轨道存入结果中
-//     if (wf_conf.return_orbit) {
-//         result.r     = traj.r;
-//         result.theta = traj.theta;
-//         result.phi   = traj.phi;
-//     }
-
-//     // 3. 调用 aak_phase 计算相位（如果你的 aak 波形构造需要显式相位）
-//     //    AAKPhaseData phase_data = compute_aak_phase(emri, traj);
-//     //    这里视你的实现而定，可以不单独暴露相位而直接在 aak_orbit 中处理。
-
-//     // 4. LISA 轨道与响应
-//     //    根据 emri/配置 生成 LISA 轨道对象
-//     LISAOrbit lisa_orbit;          // 假定有默认构造
-//     LISAResponse lisa_resp;        // 包含把 h+ / hx 投影到 hI / hII 的方法
-
-//     result.hI.resize(n_samples);
-//     result.hII.resize(n_samples);
-
-//     // 如果需要极化波形
-//     if (wf_conf.return_polarizations) {
-//         result.hplus.resize(n_samples);
-//         result.hcross.resize(n_samples);
-//     }
-
-//     for (std::size_t i = 0; i < n_samples; ++i) {
-//         const double t = result.t[i];
-
-//         // 4.1 在轨道上取出当前点（r, theta, phi）
-//         const double r     = traj.r[i];
-//         const double th    = traj.theta[i];
-//         const double phi   = traj.phi[i];
-
-//         // 4.2 计算源坐标系下的 h+ / hx
-//         double hplus = 0.0;
-//         double hcross = 0.0;
-
-//         // TODO: 在这里填入你从原 AAK.cc / Waveform.cc 重构的
-//         //       h+(t), h×(t) 计算公式（可能依赖 emri, 轨道, self-force 等）
-
-//         // 4.3 LISA 响应：把 (h+, h×) 投影到 (hI, hII)
-//         double hI = 0.0, hII = 0.0;
-//         lisa_resp.project(hplus, hcross, t, emri, lisa_orbit, hI, hII);
-
-//         result.hI[i] = hI;
-//         result.hII[i] = hII;
-
-//         if (wf_conf.return_polarizations) {
-//             result.hplus[i]  = hplus;
-//             result.hcross[i] = hcross;
-//         }
-//     }
-
-//     return result;
-// }
-AAKWaveformResult compute_aak_waveform_cpu(const EMRIParams& emri, 
-    const WaveformConfig& wf_conf) {
-
-// 🚧 这是一个占位实现，用于让 NK 模块先行编译
-// 在这里我们不进行任何计算，直接返回空结果或报错
-
-// std::cerr << "[Warning] AAK Waveform is currently a placeholder!" << std::endl;
-
-AAKWaveformResult result;
-
-// 如果需要防止 Python 端崩溃，可以返回一些全 0 的假数据
-// int N = 100;
-// result.t.resize(N, 0.0);
-// result.hplus.resize(N, 0.0);
-// result.hcross.resize(N, 0.0);
-
-return result;
+// 辅助函数：计算 A+, Ax 系数 (Peters & Mathews 1963 / Barack & Cutler 2004)
+// 这里的公式较为繁琐，我们实现主导项
+void compute_amplitudes(double n, double e, double &A, double &B, double &C) {
+    // Bessel functions J_n(ne)
+    double ne = n * e;
+    double J_n = gsl_sf_bessel_Jn(static_cast<int>(n), ne);
+    double J_nm1 = gsl_sf_bessel_Jn(static_cast<int>(n-1), ne);
+    double J_np1 = gsl_sf_bessel_Jn(static_cast<int>(n+1), ne);
+    
+    // Recursive relations for J_(n-2), J_(n+2) if needed, or simple approx
+    // A = -n * (J(n-2) - 2e J(n-1) + (2/n)J(n) + 2e J(n+1) - J(n+2))
+    // 简化版 (Leading order in e)
+    A = J_n; // Placeholder for complex PM formula
+    B = J_n; 
+    C = J_n;
 }
 
-} // namespace emrikludge
+// 核心波形生成函数
+std::pair<std::vector<double>, std::vector<double>> 
+generate_aak_waveform_cpp(
+    const std::vector<double>& t,
+    const std::vector<double>& p,
+    const std::vector<double>& e,
+    const std::vector<double>& iota,
+    const std::vector<double>& Phi_r,
+    const std::vector<double>& Phi_th,
+    const std::vector<double>& Phi_phi,
+    double M, double mu, double dist,
+    double viewing_theta, double viewing_phi
+) {
+    size_t N = t.size();
+    std::vector<double> h_plus(N, 0.0);
+    std::vector<double> h_cross(N, 0.0);
+
+    // 常数
+    double M_sec = M * 4.925491e-6; // Solar mass in seconds
+    double dist_sec = dist; // Gpc converted to seconds/meters outside
+    double amp_scale = mu / dist; // mu/D
+
+    // 谐波求和截断
+    int n_max = 10; // 径向谐波 (n)
+    // int l_max = 2;  // 极向谐波 (l=2 usually dominant for quadrupole)
+    // int m_max = 2;  // 方位角谐波 (m=2)
+
+    // 简化版 AAK 波形求和 (基于 Barack & Cutler 2004, Eq 42)
+    // h ~ Sum_n A_n * cos(phi_n)
+    // phi_n = 2*Phi_phi - n*Phi_r (Simplified quadrupole model)
+    
+    for (size_t i = 0; i < N; ++i) {
+        if (p[i] < 3.0) continue; // Plunge
+
+        double omega_orb = pow(1.0/p[i], 1.5); // Simplified Keplerian n
+        // 振幅因子 A ~ omega^(2/3)
+        double h_amp = amp_scale * pow(omega_orb, 2.0/3.0); 
+
+        // 对谐波求和 n = 1..10
+        for (int n = 1; n <= n_max; ++n) {
+            // 相位: 主导项是 m=2 (Quadrupole)
+            // Phase = 2 * Phi_phi + n * Phi_r (Eccentric harmonics)
+            // 注意符号定义
+            double phase_n = 2.0 * Phi_phi[i] - n * Phi_r[i];
+            
+            // Bessel 权重 J_n(n*e)
+            double ne_arg = n * e[i];
+            double Jn = gsl_sf_bessel_Jn(n, ne_arg);
+            
+            // 简单的 Plus/Cross 极化组合 (Toy Model for demonstration)
+            // 真实实现需要引入 inclination 和 viewing angle 的复杂三角函数 (Spheroidal Harmonics)
+            // 参考 alvincjk AAK.cc 中的 `FplusI * Aplus`
+            
+            double A_n = h_amp * Jn; // 粗略振幅
+            
+            h_plus[i]  += A_n * cos(phase_n);
+            h_cross[i] += A_n * sin(phase_n);
+        }
+    }
+
+    return {h_plus, h_cross};
+}
+
+} // namespace
