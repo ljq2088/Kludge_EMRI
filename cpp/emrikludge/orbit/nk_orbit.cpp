@@ -526,7 +526,7 @@ std::vector<OrbitState> BabakNKOrbit::evolve(double duration, double dt_sampling
     // 控制器：设置绝对误差和相对误差
     // EMRI 需要高精度，建议 eps_abs=1e-10, eps_rel=1e-10
     // 如果太慢，可以放宽到 1e-8
-    gsl_odeiv2_control * c = gsl_odeiv2_control_y_new(1e-9, 1e-9);
+    gsl_odeiv2_control * c = gsl_odeiv2_control_y_new(1e-8, 1e-8);
     
     // 演化驱动器
     gsl_odeiv2_evolve * e = gsl_odeiv2_evolve_alloc(6);
