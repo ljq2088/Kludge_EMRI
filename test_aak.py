@@ -162,7 +162,7 @@ def run_true_aak_test():
     ax1 = fig.add_subplot(3, 1, 1)
     ax1.plot(t_vec, p_ak, label=r'$p_{AK}$', color='blue')
     ax1.set_ylabel('Semi-latus rectum $p$ (M)')
-    ax1.set_title(f'AAK Evolution ($M=10^6, \mu=10, a={a}, e_0={e0}$)')
+    ax1.set_title(f'AAK Evolution ($M=10^6, \\mu=10, a={a}, e_0={e0}$)')
     ax1.grid(True, alpha=0.3)
     ax1.legend()
     

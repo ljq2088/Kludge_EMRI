@@ -3,7 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <gsl/gsl_sf_bessel.h>
-
+#include <omp.h> // <--- 可选：引入 OpenMP 头文件
 namespace emrikludge {
 
 // Peters-Mathews 系数结构体
@@ -80,7 +80,7 @@ generate_aak_waveform_cpp(
     // 注意：AAK 通常在源坐标系计算 h+, hx，然后由 TDI 模块处理投影。
     // 这里我们只计算 Source Frame 的 h+, hx。
     // viewing_phi 影响相位延迟。
-
+    #pragma omp parallel for schedule(guided)
     for (size_t i = 0; i < N; ++i) {
         if (p[i] < 3.0) continue;
 
