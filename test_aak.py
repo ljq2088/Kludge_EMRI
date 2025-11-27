@@ -183,7 +183,7 @@ def run_true_aak_test():
         idx_start = 0 # 从头开始看比较清晰
         idx_end = min(len(t_vec), 500)
         
-        ax3.plot(t_vec[idx_start:idx_end], h_plus[idx_start:idx_end], 'r-', lw=1.5, label='True AAK')
+        ax3.plot(t_vec[idx_start:idx_end], h_plus[idx_start:idx_end], 'r-', lw=1.5, label='$h_+$')
         # 叠加 Cross 验证相位差
         ax3.plot(t_vec[idx_start:idx_end], h_cross[idx_start:idx_end], 'b--', lw=1.0, alpha=0.5, label=r'$h_\times$')
         

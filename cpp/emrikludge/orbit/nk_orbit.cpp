@@ -279,34 +279,139 @@ NKFluxes BabakNKOrbit::compute_gg06_fluxes(double p, double e, double iota, doub
     double term_Q = g.g[9] - q_spin*Mp15*cos_i*g.g10b - Mp*g.g[11] + PI*Mp15*g.g[12] - Mp2*g.g[13] + q_spin*q_spin*Mp2*(g.g[14] - (45.0/8.0)*sin2_i);
     flux.dQ_dt = factor_Q * sqrt_Q_spec * term_Q; 
 
-    // B. Jacobian Transformation
-    double dp = 1e-5 * p;
-    double de_step = 1e-5;
-    double di = 1e-5;
+    // ======================================================================
+    // B. Jacobian Transformation (Analytical Implementation)
+    // Replaces the slow finite-difference numerical differentiation
+    // ======================================================================
     
-    auto get_ELQ = [&](double tp, double te, double ti) -> array<double, 3> {
-        KerrConstants k = get_conserved_quantities(M_code, a, tp, te, ti);
-        return {k.E, k.Lz, k.Q};
-    };
+    // Check for circular or near-singular cases where analytic method might be unstable
+    // due to degeneracy between rp and ra. For safety, fallback to numerical 
+    // or simplified logic could be added, but here we implement the robust analytic form
+    // for generic orbits (e > 1e-4).
     
-    auto v0 = get_ELQ(p, safe_e, iota);
-    auto vp = get_ELQ(p+dp, safe_e, iota);
-    auto ve = get_ELQ(p, safe_e+de_step, iota);
-    auto vi = get_ELQ(p, safe_e, iota+di);
-    
-    double J11=(vp[0]-v0[0])/dp, J12=(ve[0]-v0[0])/de_step, J13=(vi[0]-v0[0])/di;
-    double J21=(vp[1]-v0[1])/dp, J22=(ve[1]-v0[1])/de_step, J23=(vi[1]-v0[1])/di;
-    double J31=(vp[2]-v0[2])/dp, J32=(ve[2]-v0[2])/de_step, J33=(vi[2]-v0[2])/di;
-    
-    double det = J11*(J22*J33 - J23*J32) - J12*(J21*J33 - J23*J31) + J13*(J21*J32 - J22*J31);
-    if (abs(det) < 1e-16) return flux;
-    
-    double idet = 1.0/det;
-    double y1=flux.dE_dt, y2=flux.dLz_dt, y3=flux.dQ_dt;
-    
-    flux.dp_dt = idet * (y1*(J22*J33 - J23*J32) + y2*(J13*J32 - J12*J33) + y3*(J12*J23 - J13*J22));
-    flux.de_dt = idet * (y1*(J23*J31 - J21*J33) + y2*(J11*J33 - J13*J31) + y3*(J13*J21 - J11*J23));
-    flux.diota_dt = idet * (y1*(J21*J32 - J22*J31) + y2*(J12*J31 - J11*J32) + y3*(J11*J22 - J12*J21));
+    if (safe_e > 1e-4) {
+        // Current conserved quantities
+        double E = k_curr.E;
+        double Lz = k_curr.Lz;
+        double Q = k_curr.Q;
+        
+        // Turning points
+        double r_p = p / (1.0 + safe_e);
+        double r_a = p / (1.0 - safe_e);
+
+        // 1. Calculate Matrix A = dG/du (Gradient w.r.t Constants E, Lz, Q)
+        // G1 = V(rp), G2 = V(ra), G3 = Constraint
+        // We define a helper lambda similar to the one in get_conserved_quantities
+        auto get_V_derivs_const = [&](double r) -> array<double, 3> {
+            double Delta = r*r - 2*M_code*r + a*a;
+            double X = E*(r*r + a*a) - Lz*a;
+            // dV/dE = 2X(r^2+a^2) - Delta * 2(Lz-aE)*(-a)
+            double dV_dE = 2*X*(r*r+a*a) + 2*a*Delta*(Lz - a*E);
+            // dV/dL = 2X(-a) - Delta * 2(Lz-aE)
+            double dV_dL = -2*a*X - 2*Delta*(Lz - a*E);
+            // dV/dQ = -Delta
+            double dV_dQ = -Delta;
+            return {dV_dE, dV_dL, dV_dQ};
+        };
+
+        auto dA_rp = get_V_derivs_const(r_p); // Row 1 of A
+        auto dA_ra = get_V_derivs_const(r_a); // Row 2 of A
+        
+        // Row 3 of A: d(Constraint)/d(E,L,Q)
+        // Constraint: F3 = Q*c^2 - L^2*s^2 = 0
+        double A31 = 0.0;                   // dF3/dE
+        double A32 = -2.0 * Lz * sin2_i;    // dF3/dL
+        double A33 = cos2_i;                // dF3/dQ
+
+        // 2. Calculate RHS Vector Y = - A * (du/dt)
+        // u_dot = {flux.dE_dt, flux.dLz_dt, flux.dQ_dt}
+        double Y1 = -(dA_rp[0]*flux.dE_dt + dA_rp[1]*flux.dLz_dt + dA_rp[2]*flux.dQ_dt);
+        double Y2 = -(dA_ra[0]*flux.dE_dt + dA_ra[1]*flux.dLz_dt + dA_ra[2]*flux.dQ_dt);
+        double Y3 = -(A31*flux.dE_dt + A32*flux.dLz_dt + A33*flux.dQ_dt);
+
+        // 3. Calculate Matrix B = dG/dlambda (Gradient w.r.t Orbital params p, e, iota)
+        // We need radial potential slope V'(r) at turning points
+        double Vprime_p = radial_potential_deriv(r_p, M_code, a, E, Lz, Q);
+        double Vprime_a = radial_potential_deriv(r_a, M_code, a, E, Lz, Q);
+
+        // Derivatives of r_p, r_a w.r.t p, e
+        double drp_dp = 1.0 / (1.0 + safe_e);
+        double drp_de = -p / ((1.0 + safe_e)*(1.0 + safe_e));
+        
+        double dra_dp = 1.0 / (1.0 - safe_e);
+        double dra_de = p / ((1.0 - safe_e)*(1.0 - safe_e));
+
+        // Elements of B (G1=V(rp), G2=V(ra))
+        double B11 = Vprime_p * drp_dp; // dG1/dp
+        double B12 = Vprime_p * drp_de; // dG1/de
+        // B13 = 0
+        
+        double B21 = Vprime_a * dra_dp; // dG2/dp
+        double B22 = Vprime_a * dra_de; // dG2/de
+        // B23 = 0
+
+        // Elements for G3 (Constraint)
+        // dF3/di = Q*2c(-s) - L^2*2s(c) = -2sc(Q+L^2)
+        double B33 = -2.0 * sin_i * cos_i * (Q + Lz*Lz);
+
+        // 4. Solve B * dlambda/dt = Y for dlambda/dt
+        // Structure of B is block diagonal:
+        // [ B11 B12  0  ] [ dp ]   [ Y1 ]
+        // [ B21 B22  0  ] [ de ] = [ Y2 ]
+        // [  0   0  B33 ] [ di ]   [ Y3 ]
+
+        // Solve for iota
+        if (abs(B33) > 1e-14) {
+            flux.diota_dt = Y3 / B33;
+        } else {
+            flux.diota_dt = 0.0; // Avoid singularity at pole/equator if Q+L^2=0
+        }
+
+        // Solve for p, e using Cramer's rule or simple inversion
+        double detB_sub = B11*B22 - B12*B21;
+        if (abs(detB_sub) > 1e-18) {
+            flux.dp_dt = (B22*Y1 - B12*Y2) / detB_sub;
+            flux.de_dt = (B11*Y2 - B21*Y1) / detB_sub;
+        } else {
+            // Fallback for singular configuration (should be rare with e > 1e-4)
+            flux.dp_dt = 0.0;
+            flux.de_dt = 0.0;
+        }
+
+    } else {
+        // Fallback to Numerical Differentiation for quasi-circular orbits (e < 1e-4)
+        // The analytic method above involves 1/(1-e) terms and difference of roots 
+        // which becomes degenerate as r_p -> r_a.
+        // We keep the original numerical logic here for safety.
+        
+        double dp = 1e-5 * p;
+        double de_step = 1e-5;
+        double di = 1e-5;
+        
+        auto get_ELQ = [&](double tp, double te, double ti) -> array<double, 3> {
+            KerrConstants k = get_conserved_quantities(M_code, a, tp, te, ti);
+            return {k.E, k.Lz, k.Q};
+        };
+        
+        auto v0 = get_ELQ(p, safe_e, iota);
+        auto vp = get_ELQ(p+dp, safe_e, iota);
+        auto ve = get_ELQ(p, safe_e+de_step, iota);
+        auto vi = get_ELQ(p, safe_e, iota+di);
+        
+        double J11=(vp[0]-v0[0])/dp, J12=(ve[0]-v0[0])/de_step, J13=(vi[0]-v0[0])/di;
+        double J21=(vp[1]-v0[1])/dp, J22=(ve[1]-v0[1])/de_step, J23=(vi[1]-v0[1])/di;
+        double J31=(vp[2]-v0[2])/dp, J32=(ve[2]-v0[2])/de_step, J33=(vi[2]-v0[2])/di;
+        
+        double det = J11*(J22*J33 - J23*J32) - J12*(J21*J33 - J23*J31) + J13*(J21*J32 - J22*J31);
+        if (abs(det) < 1e-16) return flux;
+        
+        double idet = 1.0/det;
+        double y1=flux.dE_dt, y2=flux.dLz_dt, y3=flux.dQ_dt;
+        
+        flux.dp_dt = idet * (y1*(J22*J33 - J23*J32) + y2*(J13*J32 - J12*J33) + y3*(J12*J23 - J13*J22));
+        flux.de_dt = idet * (y1*(J23*J31 - J21*J33) + y2*(J11*J33 - J13*J31) + y3*(J13*J21 - J11*J23));
+        flux.diota_dt = idet * (y1*(J21*J32 - J22*J31) + y2*(J12*J31 - J11*J32) + y3*(J11*J22 - J12*J21));
+    }
     
     return flux;
 }
