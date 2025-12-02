@@ -96,7 +96,7 @@ def run_true_aak_test():
         print("⚠️ Warning: Frequency hierarchy unexpected (Check Schmidt formulas).")
 
     # --- D. 轨道演化 (Step 2 Check) ---
-    T=0.5#年
+    T=2#年
     duration_M = T*365.0*24.0*3600.0 / get_time_unit_seconds(M) # 演化时长 (M)
     dt=5.0 #秒
     dt_M = dt / get_time_unit_seconds(M)        # 采样步长 (AAK 不需要太密)
