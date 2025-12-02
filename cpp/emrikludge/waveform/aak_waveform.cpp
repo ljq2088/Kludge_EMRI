@@ -18,14 +18,14 @@ struct PMCoeffs {
 PMCoeffs compute_pm_coeffs_exact(int n, double e) {
     // 1. 处理 n=0 的特殊情况 (避免 0/0)
     
-    if (n == 0) {
-        // 当 n=0 时，J_0(0)=1, 其他 J_k(0)=0
-        // a = 0, b = 0, c = 2*J_0(0) = 2.0
-        return {0.0, 0.0, 2.0};
-    }
+    // if (n == 0) {
+    //     // 当 n=0 时，J_0(0)=1, 其他 J_k(0)=0
+    //     // a = 0, b = 0, c = 2*J_0(0) = 2.0
+    //     return {0.0, 0.0, 2.0};
+    // }
 
     // 2. 贝塞尔函数参数: x = n * e
-    double x = n* e;
+    double x =2.0 * e;
     
     // 我们需要 J_{n-2}, J_{n-1}, J_n, J_{n+1}, J_{n+2}
     // 使用 GSL 的递推计算比多次调用更高效且稳健
@@ -39,7 +39,7 @@ PMCoeffs compute_pm_coeffs_exact(int n, double e) {
     // };
     auto get_J = [&](int k) {
         int abs_k = std::abs(k);
-        double val = gsl_sf_bessel_Jn(abs_k, x); // 注意这里用 x = n*e
+        double val = gsl_sf_bessel_Jn(abs_k, x); 
         if (k < 0 && (abs_k % 2 != 0)) val = -val; 
         return val;
     };
