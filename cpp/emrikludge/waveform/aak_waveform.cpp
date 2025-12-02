@@ -25,21 +25,21 @@ PMCoeffs compute_pm_coeffs_exact(int n, double e) {
     }
 
     // 2. 贝塞尔函数参数: x = n * e
-    double x = 2.0* e;
+    double x = n* e;
     
     // 我们需要 J_{n-2}, J_{n-1}, J_n, J_{n+1}, J_{n+2}
     // 使用 GSL 的递推计算比多次调用更高效且稳健
     // 但是 GSL 的 array 函数要求 n_min >= 0。由于 n 可以是负数，利用 J_{-n}(x) = (-1)^n J_n(x) 转换
     
-    auto get_bessel = [&](int k, double arg) {
-        int abs_k = std::abs(k);
-        double val = gsl_sf_bessel_Jn(abs_k, arg);
-        if (k < 0 && (abs_k % 2 != 0)) val = -val; // J_{-n} = (-1)^n J_n
-        return val;
-    };
+    // auto get_bessel = [&](int k, double arg) {
+    //     int abs_k = std::abs(k);
+    //     double val = gsl_sf_bessel_Jn(abs_k, arg);
+    //     if (k < 0 && (abs_k % 2 != 0)) val = -val; // J_{-n} = (-1)^n J_n
+    //     return val;
+    // };
     auto get_J = [&](int k) {
         int abs_k = std::abs(k);
-        double val = gsl_sf_bessel_Jn(abs_k, x);
+        double val = gsl_sf_bessel_Jn(abs_k, x); // 注意这里用 x = n*e
         if (k < 0 && (abs_k % 2 != 0)) val = -val; 
         return val;
     };
