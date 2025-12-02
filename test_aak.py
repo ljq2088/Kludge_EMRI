@@ -3,7 +3,8 @@ import matplotlib.pyplot as plt
 import time
 import sys
 import os
-
+from src.emrikludge.lisa.response_approx import project_to_lisa_channels
+from src.emrikludge.parameters import EMRIParameters
 # ==========================================
 # 0. 环境检查与导入
 # ==========================================
@@ -124,6 +125,7 @@ def run_true_aak_test():
     phir  = np.array([s.Phi_r for s in traj])
     phith = np.array([s.Phi_theta for s in traj])
     phiphi= np.array([s.Phi_phi for s in traj])
+    omphi  = np.array([s.Omega_phi for s in traj])
     
     print(f"  Final p_AK: {p_ak[-1]:.4f} (Delta p = {p_ak[0]-p_ak[-1]:.4e})")
 
@@ -136,6 +138,7 @@ def run_true_aak_test():
     h_plus, h_cross = generate_aak_waveform_cpp(
         t_vec, p_ak, e_ak, np.full_like(t_vec, iota0), 
         phir, phith, phiphi,
+        omphi,
         M, mu, dist_in_solar_masses,
         np.pi/3, 0.0 # Viewing angles
     )
@@ -152,7 +155,21 @@ def run_true_aak_test():
     if max_h == 0.0:
         print("❌ Error: Waveform is all zeros!")
         return
-
+    print(f"\n[Step 3.5] Applying LISA Response (Python)...")
+    class SimpleParams:
+        pass
+    p_lisa = SimpleParams()
+    p_lisa.lambda_S = np.radians(45.0)  # 黄道经度
+    p_lisa.beta_S = np.radians(30.0)    # 黄道纬度
+    p_lisa.psi_S = 0.5                  # 极化角
+    
+    # 2. 转换时间为秒 (用于计算轨道位置)
+    t_sec = t_vec * T_unit
+    
+    # 3. 投影
+    h_I, h_II = project_to_lisa_channels(t_sec, h_plus, h_cross, params=p_lisa)
+    
+    print("  LISA response applied.")
     # --- F. 绘图 ---
     print(f"\n[Step 4] Plotting results...")
     
@@ -196,6 +213,19 @@ def run_true_aak_test():
     plt.tight_layout()
     plt.savefig("AAK_Final_Check.png", dpi=150)
     print("✅ Plot saved to AAK_Final_Check.png")
+    #看看h_I,h_II波形
+    if len(t_vec) > zoom:
+        plt.figure(figsize=(10,4))
+        plt.plot(t_vec[idx_start:idx_end], h_I[idx_start:idx_end], 'g-', lw=1.5, label='h_I')
+        plt.plot(t_vec[idx_start:idx_end], h_II[idx_start:idx_end], 'm--', lw=1.0, alpha=0.5, label='h_II')
+        plt.xlabel('Time (M)')
+        plt.ylabel('Strain')
+        plt.title('LISA Channels Detail (h_I and h_II)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig("AAK_LISA_Channels_Check.png", dpi=150)
+        print("✅ Plot saved to AAK_LISA_Channels_Check.png")
     # plt.show()
 
 if __name__ == "__main__":

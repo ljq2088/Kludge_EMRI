@@ -60,7 +60,7 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
         
         // 6. 存储状态
         // 列表初始化构造 AAKState
-        traj.push_back({t, p_ak, e_ak, i_ak, m_Phi_r, m_Phi_theta, m_Phi_phi});
+        traj.push_back({t, p_ak, e_ak, i_ak, m_Phi_r, m_Phi_theta, m_Phi_phi, kf.Omega_phi});
         
         t += dt;
     }

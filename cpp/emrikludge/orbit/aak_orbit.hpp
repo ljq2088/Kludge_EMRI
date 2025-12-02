@@ -14,6 +14,7 @@ struct AAKState {
     double Phi_r;   // 精确相位
     double Phi_theta;
     double Phi_phi;
+    double Omega_phi;
 };
 
 class BabakAAKOrbit {

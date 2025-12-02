@@ -21,8 +21,10 @@ generate_aak_waveform_cpp(
     const std::vector<double>& Phi_r,
     const std::vector<double>& Phi_th,
     const std::vector<double>& Phi_phi,
+    const std::vector<double>& Omega_phi,
     double M, double mu, double dist,
     double viewing_theta, double viewing_phi
+   
 );
     AAKWaveformResult compute_aak_waveform_cpu(const EMRIParams& emri, 
         const WaveformConfig& wf_conf);

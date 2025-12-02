@@ -16,7 +16,8 @@ void init_bindings_aak(py::module &m) {
         .def_readwrite("iota_ak", &AAKState::iota_ak)
         .def_readwrite("Phi_r", &AAKState::Phi_r)
         .def_readwrite("Phi_theta", &AAKState::Phi_theta)
-        .def_readwrite("Phi_phi", &AAKState::Phi_phi);
+        .def_readwrite("Phi_phi", &AAKState::Phi_phi)
+        .def_readwrite("Omega_phi", &AAKState::Omega_phi);
 
     // --- AAK 轨道 ---
     py::class_<BabakAAKOrbit>(m, "BabakAAKOrbit")
@@ -31,6 +32,7 @@ void init_bindings_aak(py::module &m) {
           "Generate AAK waveform",
           py::arg("t"), py::arg("p"), py::arg("e"), py::arg("iota"),
           py::arg("Phi_r"), py::arg("Phi_th"), py::arg("Phi_phi"),
+          py::arg("Omega_phi"),
           py::arg("M"), py::arg("mu"), py::arg("dist"),
           py::arg("viewing_theta"), py::arg("viewing_phi"));
 

@@ -17,6 +17,7 @@ struct PMCoeffs {
 // 注意：这里的 n 是径向谐波阶数
 PMCoeffs compute_pm_coeffs_exact(int n, double e) {
     // 1. 处理 n=0 的特殊情况 (避免 0/0)
+    
     if (n == 0) {
         // 当 n=0 时，J_0(0)=1, 其他 J_k(0)=0
         // a = 0, b = 0, c = 2*J_0(0) = 2.0
@@ -24,7 +25,7 @@ PMCoeffs compute_pm_coeffs_exact(int n, double e) {
     }
 
     // 2. 贝塞尔函数参数: x = n * e
-    double x = n * e;
+    double x = 2.0* e;
     
     // 我们需要 J_{n-2}, J_{n-1}, J_n, J_{n+1}, J_{n+2}
     // 使用 GSL 的递推计算比多次调用更高效且稳健
@@ -37,11 +38,11 @@ PMCoeffs compute_pm_coeffs_exact(int n, double e) {
         return val;
     };
 
-    double jn   = get_bessel(n, x);
-    double jnm1 = get_bessel(n - 1, x);
-    double jnm2 = get_bessel(n - 2, x);
-    double jnp1 = get_bessel(n + 1, x);
-    double jnp2 = get_bessel(n + 2, x);
+    double jn   = get_bessel(n);
+    double jnm1 = get_bessel(n - 1);
+    double jnm2 = get_bessel(n - 2);
+    double jnp1 = get_bessel(n + 1);
+    double jnp2 = get_bessel(n + 2);
 
     PMCoeffs res;
     
@@ -67,6 +68,7 @@ generate_aak_waveform_cpp(
     const std::vector<double>& Phi_r,
     const std::vector<double>& Phi_th,
     const std::vector<double>& Phi_phi,
+    const std::vector<double>& Omega_phi,
     double M, double mu, double dist,
     double viewing_theta, double viewing_phi
 ) {
@@ -94,7 +96,8 @@ generate_aak_waveform_cpp(
         
         // 基础振幅 (Barack & Cutler 2004 Eq 42 前缀)
         // H ~ (mu/D) * (M * n)^(2/3)
-        double h_amp = amp_scale * pow(n_kepler, 2.0/3.0);
+        double freq_val = Omega_phi[i];
+        double h_amp = amp_scale * pow(freq_val, 2.0/3.0);
 
         // 极化几何因子
         double cosi = cos(iota_val);
