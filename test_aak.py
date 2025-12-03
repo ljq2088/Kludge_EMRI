@@ -120,14 +120,16 @@ def run_true_aak_test():
         
     # 解包数据
     t_vec = np.array([s.t for s in traj])
-    p_ak  = np.array([s.p_ak for s in traj]) # 映射后的参数
-    e_ak  = np.array([s.e_ak for s in traj])
+    p_map = np.array([s.p_map for s in traj]) 
+    e_phys = np.array([s.e for s in traj])
+    iota_phys = np.array([s.iota for s in traj])
+    
     phir  = np.array([s.Phi_r for s in traj])
     phith = np.array([s.Phi_theta for s in traj])
     phiphi= np.array([s.Phi_phi for s in traj])
-    omphi  = np.array([s.Omega_phi for s in traj])
+    omphi = np.array([s.Omega_phi for s in traj])
     
-    print(f"  Final p_AK: {p_ak[-1]:.4f} (Delta p = {p_ak[0]-p_ak[-1]:.4e})")
+    print(f"  Final p: {p_map[-1]:.4f} (Delta p = {p_map[0]-p_map[-1]:.4e})")
 
     # --- E. 波形生成 (Step 3 Check) ---
     print(f"\n[Step 3] Generating Waveform (Peters-Mathews Summation)...")
@@ -136,13 +138,12 @@ def run_true_aak_test():
     # 调用 C++ 波形生成器
     # 注意：传入 dist_in_solar_masses
     h_plus, h_cross = generate_aak_waveform_cpp(
-        t_vec, p_ak, e_ak, np.full_like(t_vec, iota0), 
+        t_vec, p_map, e_phys, iota_phys,  # <-- 传入物理 e, iota
         phir, phith, phiphi,
         omphi,
         M, mu, dist_in_solar_masses,
-        np.pi/3, 0.0 # Viewing angles
+        np.pi/3, 0.0 
     )
-    
     print(f"  Waveform done in {time.time() - start_t:.4f} s.")
     
     # 检查数值

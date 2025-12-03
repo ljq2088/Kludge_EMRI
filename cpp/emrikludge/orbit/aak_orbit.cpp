@@ -17,7 +17,8 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
     double p = p0;
     double e = e0;
     double iota = iota0;
-    
+
+    double M_geo = 1.0;
     // 预估容量
     size_t steps = static_cast<size_t>(duration / dt);
     traj.reserve(steps + 100);
@@ -37,18 +38,22 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
 
         // 3. 计算精确基频 (The Augmented Part)
         // 假设 M_phys 已经归一化或者在内部处理，这里传入 1.0 作为几何单位质量
-        KerrFreqs kf = KerrFundamentalFrequencies::compute(1.0, a_spin, p, e, iota);
+        KerrFreqs kf = KerrFundamentalFrequencies::compute(M_geo, a_spin, p, e, iota);
         
         if (kf.Omega_r == 0.0) break; // Mapping 失败
         
         // 4. 映射到 AK 参数 (The Map)
-        double p_ak, e_ak, i_ak;
-        AAKMap::find_ak_parameters(1.0, a_spin, kf.Omega_r, kf.Omega_theta, kf.Omega_phi, 
-                                   p, e, iota, 
-                                   p_ak, e_ak, i_ak);
+        double M_map, a_map, p_map;
+        AAKMap::find_map_parameters(M_geo, a_spin, p, e, iota,
+            kf.Omega_r, kf.Omega_theta, kf.Omega_phi,
+            M_map, a_map, p_map);
         
         // Fallback: 如果 Map 失败，回退到物理参数
-        if (p_ak == 0.0) { p_ak = p; e_ak = e; i_ak = iota; }
+        if (p_map == 0.0) {
+            M_map = M_geo;
+            a_map = a_spin;
+            p_map = p;
+        }
 
         // 5. 累积相位
         // 注意：这里假设 Omega 是 dPhi/dt (Coordinate time frequency)
@@ -60,7 +65,8 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
         
         // 6. 存储状态
         // 列表初始化构造 AAKState
-        traj.push_back({t, p_ak, e_ak, i_ak, m_Phi_r, m_Phi_theta, m_Phi_phi, kf.Omega_phi});
+        traj.push_back({t, p_map, M_map, a_map, e, iota, 
+            m_Phi_r, m_Phi_theta, m_Phi_phi, kf.Omega_phi});
         
         t += dt;
     }
