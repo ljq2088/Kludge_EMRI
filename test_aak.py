@@ -42,7 +42,7 @@ def get_time_unit_seconds(M_phys_solar):
 # 2. 主测试流程
 # ==========================================
 def run_true_aak_test():
-    print(f"=== AAK Update 9 Verification Pipeline ===")
+    print("\n=== AAK End-to-End Test ===")
     
     # --- A. 系统参数 (典型 LISA 源) ---
     M = 1e6      # 主黑洞质量 (Solar Mass)
