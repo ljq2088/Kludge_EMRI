@@ -45,7 +45,7 @@ def run_true_aak_test():
     print("\n=== AAK End-to-End Test ===")
     
     # --- A. 系统参数 (典型 LISA 源) ---
-    M = 1e6      # 主黑洞质量 (Solar Mass)
+    M = 1.0e6      # 主黑洞质量 (Solar Mass)
     mu = 10.0    # 小天体质量 (Solar Mass)
     a = 0.9      # 高自旋
     p0 = 10.0    # 强场区边缘
