@@ -118,9 +118,11 @@ def run_true_aak_test():
         print("❌ Error: Trajectory is empty!")
         return
         
-    # 解包数据
+    # 解包
     t_vec = np.array([s.t for s in traj])
     p_map = np.array([s.p_map for s in traj]) 
+    M_map = np.array([s.M_map for s in traj]) # [NEW]
+    a_map = np.array([s.a_map for s in traj]) # [NEW]
     e_phys = np.array([s.e for s in traj])
     iota_phys = np.array([s.iota for s in traj])
     
@@ -138,7 +140,8 @@ def run_true_aak_test():
     # 调用 C++ 波形生成器
     # 注意：传入 dist_in_solar_masses
     h_plus, h_cross = generate_aak_waveform_cpp(
-        t_vec, p_map, e_phys, iota_phys,  # <-- 传入物理 e, iota
+        t_vec, p_map, e_phys, iota_phys, 
+        M_map, a_map, # [NEW]
         phir, phith, phiphi,
         omphi,
         M, mu, dist_in_solar_masses,
@@ -178,7 +181,7 @@ def run_true_aak_test():
     
     # 1. 轨道参数演化
     ax1 = fig.add_subplot(3, 1, 1)
-    ax1.plot(t_vec, p_ak, label=r'$p_{AK}$', color='blue')
+    ax1.plot(t_vec, p_map, label=r'$p_{AK}$', color='blue')
     ax1.set_ylabel('Semi-latus rectum $p$ (M)')
     ax1.set_title(f'AAK Evolution ($M=10^6, \\mu=10, a={a}, e_0={e0}$)')
     ax1.grid(True, alpha=0.3)

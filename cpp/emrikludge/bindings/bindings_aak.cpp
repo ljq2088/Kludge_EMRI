@@ -39,6 +39,8 @@ void init_bindings_aak(py::module &m) {
         py::arg("p"),       // not strictly used but passed
         py::arg("e"),       // Physical e
         py::arg("iota"),    // Physical iota
+        py::arg("M_map"), // [NEW]
+        py::arg("a_map"), // [NEW]
         py::arg("Phi_r"),
         py::arg("Phi_th"),
         py::arg("Phi_phi"),

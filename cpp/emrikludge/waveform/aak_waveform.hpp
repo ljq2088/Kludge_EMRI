@@ -15,9 +15,11 @@ namespace emrikludge {
     std::pair<std::vector<double>, std::vector<double>> 
 generate_aak_waveform_cpp(
     const std::vector<double>& t,
-    const std::vector<double>& p,
-    const std::vector<double>& e,
-    const std::vector<double>& iota,
+    const std::vector<double>& p,       // p_map
+    const std::vector<double>& e,       // e_phys
+    const std::vector<double>& iota,    // iota_phys
+    const std::vector<double>& M_map,   // [NEW] 映射质量
+    const std::vector<double>& a_map,   // [NEW] 映射自旋
     const std::vector<double>& Phi_r,
     const std::vector<double>& Phi_th,
     const std::vector<double>& Phi_phi,
