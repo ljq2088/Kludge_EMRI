@@ -14,18 +14,24 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
     double p = p0;
     double e = e0;
     double iota = iota0;
-
+    
+    double M_geo_unit = 1.0; 
+    
+    // 初始化缓存 (Warm Start & Smoothing)
     prev_M_map = 0.0;
     prev_a_map = 0.0;
     prev_p_map = 0.0;
-    
-    // 用于计算 Dimensionless Kerr Frequencies 的基准
-    double M_geo_unit = 1.0; 
-    
+
     traj.reserve(static_cast<size_t>(duration / dt) + 100);
 
+    // 平滑因子 (Alpha): 越小越平滑，但滞后越大。
+    // 0.2 表示新值权重 20%，历史值权重 80%。
+    // 这能极其有效地消除 "Solver Jitter"。
+    const double SMOOTHING_ALPHA = 0.1; 
+
+    size_t step = 0;
     while (t < duration) {
-        // 1. 通量演化物理参数
+        // 1. 物理演化 (NK Flux)
         NKFluxes flux = BabakNKOrbit::compute_gg06_fluxes(p, e, iota, a_spin, M_phys, mu_phys);
         p += flux.dp_dt * dt;
         e += flux.de_dt * dt;
@@ -33,42 +39,53 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
         
         if (p < 3.0 || e >= 0.999 || e < 0.0) break;
 
-        // 2. 计算精确 Kerr 无量纲频率
+        // 2. 计算 Kerr 频率
         KerrFreqs kf = KerrFundamentalFrequencies::compute(M_geo_unit, a_spin, p, e, iota);
         if (kf.Omega_r == 0.0) break;
 
-        // 3. 映射 (传入 M_phys 以解出物理 M_map)
-        double M_map_curr = prev_M_map;
-        double a_map_curr = prev_a_map;
-        double p_map_curr = prev_p_map;
+        // 3. 映射求解 (Raw Solve)
+        double M_map_raw, a_map_raw, p_map_raw;
+        
+        // 使用上一时刻的平滑值作为初值 (Warm Start)
+        M_map_raw = prev_M_map;
+        a_map_raw = prev_a_map;
+        p_map_raw = prev_p_map;
+
         AAKMap::find_map_parameters(M_phys, a_spin, p, e, iota,
                                     kf.Omega_r, kf.Omega_theta, kf.Omega_phi,
-                                    M_map_curr, a_map_curr, p_map_curr);
-        prev_M_map = M_map_curr;
-        prev_a_map = a_map_curr;
-        prev_p_map = p_map_curr;
+                                    M_map_raw, a_map_raw, p_map_raw);
 
-        // 4. 累积相位
-        // 注意：相位累积需要物理频率 (1/Time)。
-        // kf 是无量纲 (Omega * M)。所以 Physical Omega = kf / M_phys.
-        // dt 是物理时间。
-        // 所以 dPhi = (kf / M_phys) * dt.
-        // 这里的 M_phys 必须和 dt 的单位一致 (比如都是秒，或都是几何单位M)。
-        // 假设 dt 是以 M 为单位的时间 (e.g. 5.0M)，则 M_phys 在此公式中应视为 1?
-        // 不，如果 dt 是几何单位 (dt_M)，那么 dPhi = kf * dt_M。
-        // 如果 dt 是秒，dPhi = (kf / (M_phys_sec)) * dt_sec。
-        // 通常 evolve 函数的 dt 是几何单位。如果是这样，直接乘 kf 即可。
-        // 假设 evolve 传入的是 Dimensionless Time (t/M).
+        // 4. 平滑处理 (Smoothing / Interpolation Proxy)
+        double M_map_smooth, a_map_smooth, p_map_smooth;
+
+        if (step == 0) {
+            // 第一步直接接受
+            M_map_smooth = M_map_raw;
+            a_map_smooth = a_map_raw;
+            p_map_smooth = p_map_raw;
+        } else {
+            // 后续步骤应用 EMA 滤波
+            M_map_smooth = (1.0 - SMOOTHING_ALPHA) * prev_M_map + SMOOTHING_ALPHA * M_map_raw;
+            a_map_smooth = (1.0 - SMOOTHING_ALPHA) * prev_a_map + SMOOTHING_ALPHA * a_map_raw;
+            p_map_smooth = (1.0 - SMOOTHING_ALPHA) * prev_p_map + SMOOTHING_ALPHA * p_map_raw;
+        }
+
+        // 更新缓存 (供下一步 Warm Start 和平滑使用)
+        prev_M_map = M_map_smooth;
+        prev_a_map = a_map_smooth;
+        prev_p_map = p_map_smooth;
+
+        // 5. 累积相位
         m_Phi_r     += kf.Omega_r * dt;
         m_Phi_theta += kf.Omega_theta * dt;
         m_Phi_phi   += kf.Omega_phi * dt;
         
-        // 5. 存储状态
-        // 存入 kf.Omega_phi (无量纲) 供后续振幅计算参考
-        traj.push_back({t, p_map_curr, M_map_curr, a_map_curr, e, iota, 
+        // 6. 存储状态 (使用平滑后的值!)
+        traj.push_back({t, p_map_smooth, M_map_smooth, a_map_smooth, e, iota, 
                         m_Phi_r, m_Phi_theta, m_Phi_phi, kf.Omega_phi});
         
         t += dt;
+        step++;
     }
     
     return traj;
