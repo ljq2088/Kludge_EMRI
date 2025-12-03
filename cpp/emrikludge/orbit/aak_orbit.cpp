@@ -14,6 +14,10 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
     double p = p0;
     double e = e0;
     double iota = iota0;
+
+    prev_M_map = 0.0;
+    prev_a_map = 0.0;
+    prev_p_map = 0.0;
     
     // 用于计算 Dimensionless Kerr Frequencies 的基准
     double M_geo_unit = 1.0; 
@@ -34,10 +38,15 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
         if (kf.Omega_r == 0.0) break;
 
         // 3. 映射 (传入 M_phys 以解出物理 M_map)
-        double M_map, a_map, p_map;
+        double M_map_curr = prev_M_map;
+        double a_map_curr = prev_a_map;
+        double p_map_curr = prev_p_map;
         AAKMap::find_map_parameters(M_phys, a_spin, p, e, iota,
                                     kf.Omega_r, kf.Omega_theta, kf.Omega_phi,
-                                    M_map, a_map, p_map);
+                                    M_map_curr, a_map_curr, p_map_curr);
+        prev_M_map = M_map_curr;
+        prev_a_map = a_map_curr;
+        prev_p_map = p_map_curr;
 
         // 4. 累积相位
         // 注意：相位累积需要物理频率 (1/Time)。
@@ -56,7 +65,7 @@ std::vector<AAKState> BabakAAKOrbit::evolve(double duration, double dt) {
         
         // 5. 存储状态
         // 存入 kf.Omega_phi (无量纲) 供后续振幅计算参考
-        traj.push_back({t, p_map, M_map, a_map, e, iota, 
+        traj.push_back({t, p_map_curr, M_map_curr, a_map_curr, e, iota, 
                         m_Phi_r, m_Phi_theta, m_Phi_phi, kf.Omega_phi});
         
         t += dt;

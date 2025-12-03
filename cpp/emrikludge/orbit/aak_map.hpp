@@ -9,91 +9,82 @@
 
 namespace emrikludge {
 
-// 求解目标参数结构体
 struct MapTarget {
-    // 目标无量纲频率 (Dimensionless Omega = Physical Omega * M_phys)
-    double Om_r_target;
-    double Om_th_target;
-    double Om_phi_target;
+    double Om_r_tgt_dim;   // 无量纲目标频率 (Omega * M)
+    double Om_th_tgt_dim;
+    double Om_phi_tgt_dim;
     
-    // 物理参数 (固定)
-    double M_phys;    // 物理质量 (几何单位下通常为 1.0)
-    double e_phys;    // 物理偏心率
-    double iota_phys; // 物理倾角
+    double M_phys;         // 真实的物理质量 (e.g. 1e6)
+    double e_phys;
+    double iota_phys;
 };
 
 class AAKMap {
 public:
     // ---------------------------------------------------------
-    // 1. AK 频率公式
-    // 计算 无量纲频率 (Dimensionless Frequencies)
-    // input: M_map, a_map, p_map (映射参数)
-    // output: w_dim = w_phys * M_map
+    // 1. AK 无量纲频率公式 (Dimensionless Frequencies)
+    // 返回: w_dim = w_physical * M_map
     // ---------------------------------------------------------
     static void get_ak_dim_frequencies(double M_map, double a_map, double p_map, 
                                        double e_phys, double iota_phys,
                                        double &w_r_dim, double &w_th_dim, double &w_phi_dim) {
-        // 1. 安全检查 (Reference: KSParMap.cc logic implies robust inputs)
+        // p_map 也是无量纲的 (p/M)
         if (p_map < 2.1) p_map = 2.1;
-        // e_phys 是固定的，已经在外部截断
         
         double Y = 1.0 - e_phys * e_phys;
         
-        // 2. 计算开普勒频率 n (Physical)
-        // n = sqrt(M) / a_sma^1.5 = sqrt(M) * (Y/p)^1.5
-        // n_dim = n * M = M^1.5 * (Y/p)^1.5 = (M * Y / p)^1.5
-        double p_scaled = p_map / M_map; // p in units of M_map
-        double n_dim = pow(Y / p_scaled, 1.5);
+        // Keplerian mean motion (Dimensionless)
+        // n_dim = (M * Y / p)^1.5.  
+        // 在 AK 中, 这里的 M_map 仅作为 scaling? 
+        // 不，p_map 已经是 semi-latus rectum (unit M). 
+        // 所以 n_dim = pow(Y/p_map, 1.5).
+        // 等等，参考 KSParMap.cc 的逻辑，它求解的是 M_map。
+        // 如果我们是在求解物理 M_map，那么 dimensionless p_map 不变。
+        // 实际上，AK 频率公式通常写作 w = 1/M * F(p,e,a).
+        // 所以 w_dim = w*M = F(p,e,a).
+        // 也就是说，无量纲频率只取决于 p, e, a (dimensionless spin).
+        // M_map 的作用体现在残差方程的交叉项中。
         
-        double epsilon = 1.0 / p_scaled; // M/p
-        double SO = a_map / M_map;       // a/M (dimensionless spin)
+        double n_dim = pow(Y / p_map, 1.5);
         
-        // 3. 径向频率 (Dimensionless)
+        double epsilon = 1.0 / p_map;
+        double SO = a_map; // a_map here is dimensionless spin parameter (a/M)
+        
         w_r_dim = n_dim;
         
-        // 4. 极向频率 (1PN Schwarzschild precession)
-        // w_th = w_r * (1 + 3*eps/Y)
         double peri_adv = 3.0 * epsilon / Y;
         w_th_dim = w_r_dim * (1.0 + peri_adv);
 
-        // 5. 方位角频率 (Lense-Thirring)
-        // w_phi = w_theta + w_LT
-        // 必须包含 cos(iota) 因子。
-        // 参考 KSParMap.cc sol_fun 中对 iota 的处理
         double lt_term = 2.0 * SO * pow(epsilon, 1.5);
         w_phi_dim = w_th_dim + n_dim * lt_term * std::abs(cos(iota_phys)); 
     }
 
     // ---------------------------------------------------------
-    // 2. GSL 残差函数
-    // 复现 KSParMap.cc 的残差定义:
-    // f = Omega_tgt * M_map - Omega_map * M_phys
+    // 2. GSL 残差函数 (Strictly adhering to KSParMap.cc)
+    // f = Omega_tgt_dim * M_map - Omega_map_dim * M_phys
     // ---------------------------------------------------------
     static int map_residuals(const gsl_vector *x, void *params, gsl_vector *f) {
         struct MapTarget *tgt = (struct MapTarget *) params;
 
-        // 提取变量 (参考 KSParMap.cc 变量顺序: v, M, s -> p, M, a)
-        // 这里直接用 p, M, a 比较直观
         double p_map = gsl_vector_get(x, 0);
         double M_map = gsl_vector_get(x, 1);
-        double a_map = gsl_vector_get(x, 2);
+        double a_map = gsl_vector_get(x, 2); // Dimensionless spin
 
-        // 避免除零和非物理值
-        if (M_map < 1e-6) M_map = 1e-6;
-        if (p_map < 0.1) p_map = 0.1;
+        if (p_map < 2.05) p_map = 2.05; // Safety floor
+        if (M_map < 1.0) M_map = 1.0;   // Safety floor
 
-        // 计算当前 map 参数下的 AK 无量纲频率
         double w_r_map, w_th_map, w_phi_map;
         get_ak_dim_frequencies(M_map, a_map, p_map, tgt->e_phys, tgt->iota_phys, 
                                w_r_map, w_th_map, w_phi_map);
 
-        // 构造残差 (Strictly Reference Compliant)
-        // 目标：Physical Freqs Equal -> w_tgt/M_phys = w_map/M_map
-        // 交叉相乘: w_tgt * M_map - w_map * M_phys = 0
+        // KSParMap.cc Logic: 
+        // 物理频率匹配: w_tgt_phys = w_map_phys
+        // => w_tgt_dim / M_phys = w_map_dim / M_map
+        // => w_tgt_dim * M_map - w_map_dim * M_phys = 0
         
-        double res_r   = tgt->Om_r_target   * M_map - w_r_map   * tgt->M_phys;
-        double res_th  = tgt->Om_th_target  * M_map - w_th_map  * tgt->M_phys;
-        double res_phi = tgt->Om_phi_target * M_map - w_phi_map * tgt->M_phys;
+        double res_r   = tgt->Om_r_tgt_dim   * M_map - w_r_map   * tgt->M_phys;
+        double res_th  = tgt->Om_th_tgt_dim  * M_map - w_th_map  * tgt->M_phys;
+        double res_phi = tgt->Om_phi_tgt_dim * M_map - w_phi_map * tgt->M_phys;
 
         gsl_vector_set(f, 0, res_r);
         gsl_vector_set(f, 1, res_th);
@@ -107,32 +98,29 @@ public:
     // ---------------------------------------------------------
     static void find_map_parameters(double M_phys, double a_phys, double p_phys,
                                     double e_phys, double iota_phys,
-                                    double Om_r_kerr, double Om_th_kerr, double Om_phi_kerr,
+                                    double Om_r_kerr_dim, double Om_th_kerr_dim, double Om_phi_kerr_dim,
                                     double &M_map, double &a_map, double &p_map) {
         
-        // 初值猜测：物理参数
-        M_map = M_phys;
-        a_map = a_phys;
-        p_map = p_phys;
+        // Initial Guess
+        if (M_map == 0.0 || p_map == 0.0) {
+            M_map = M_phys;
+            a_map = a_phys;
+            p_map = p_phys;
+        }
 
-        // 频率过低直接返回（如 plunge）
-        if (Om_r_kerr < 1e-12) return;
+        if (Om_r_kerr_dim < 1e-8) return;
 
         const gsl_multiroot_fsolver_type *T = gsl_multiroot_fsolver_hybrids;
         static gsl_multiroot_fsolver *s = nullptr;
-        
-        // 线程安全注意：如果是多线程环境，s不能是 static
-        // 这里假设单线程运行
         if (!s) s = gsl_multiroot_fsolver_alloc(T, 3);
 
-        // 传入参数
         MapTarget target;
-        target.Om_r_target   = Om_r_kerr;
-        target.Om_th_target  = Om_th_kerr;
-        target.Om_phi_target = Om_phi_kerr;
-        target.M_phys        = M_phys;
-        target.e_phys        = e_phys;
-        target.iota_phys     = iota_phys;
+        target.Om_r_tgt_dim   = Om_r_kerr_dim;
+        target.Om_th_tgt_dim  = Om_th_kerr_dim;
+        target.Om_phi_tgt_dim = Om_phi_kerr_dim;
+        target.M_phys         = M_phys;
+        target.e_phys         = e_phys;
+        target.iota_phys      = iota_phys;
 
         gsl_multiroot_function f = {&map_residuals, 3, &target};
 
@@ -145,33 +133,23 @@ public:
 
         int iter = 0;
         int status;
-        size_t max_iter = 30; // AAK Map 收敛较快
-
         do {
             iter++;
             status = gsl_multiroot_fsolver_iterate(s);
-
-            if (status) break; // 求解器遇到问题
-
-            status = gsl_multiroot_test_residual(s->f, 1e-8); // 精度要求
-        } while (status == GSL_CONTINUE && iter < max_iter);
+            if (status) break;
+            status = gsl_multiroot_test_residual(s->f, 1e-7);
+        } while (status == GSL_CONTINUE && iter < 30);
 
         if (status == GSL_SUCCESS) {
             p_map = gsl_vector_get(s->x, 0);
             M_map = gsl_vector_get(s->x, 1);
             a_map = gsl_vector_get(s->x, 2);
-            
-            // 结果合理性检查/钳位
-            if (p_map < 2.1) p_map = 2.1;
-            // a_map 允许为负 (反向自旋修正)
         } else {
-            // 求解失败: 回退到物理参数
-            // 这通常发生在 plunge 附近
+            // Fallback
             M_map = M_phys;
             a_map = a_phys;
             p_map = p_phys;
         }
-
         gsl_vector_free(x);
     }
 };

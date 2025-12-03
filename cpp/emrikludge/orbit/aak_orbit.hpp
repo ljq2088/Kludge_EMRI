@@ -41,6 +41,10 @@ private:
     double m_Phi_r = 0.0;
     double m_Phi_theta = 0.0;
     double m_Phi_phi = 0.0;
+
+    double prev_M_map = 0.0;
+    double prev_a_map = 0.0;
+    double prev_p_map = 0.0;
 };
 
 } // namespace

@@ -52,7 +52,7 @@ def run_true_aak_test():
     e0 = 0.7     # 中等偏心率 (为了看到丰富的谐波)
     iota0 = np.radians(60.0) # 倾角
     
-    dist_gpc = 1.00 # 距离 (Gpc)
+    dist_gpc = 1.0 # 距离 (Gpc)
     
     # --- B. 单位换算 ---
     # 关键：波形振幅公式是 h ~ (mu/D) * ...
