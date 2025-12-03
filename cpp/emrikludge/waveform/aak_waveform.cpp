@@ -25,7 +25,7 @@ PMCoeffs compute_pm_coeffs_exact(int n, double e) {
     // }
 
     // 2. 贝塞尔函数参数: x = n * e
-    double x =2.0 * e;
+    double x =n * e;
     
     // 我们需要 J_{n-2}, J_{n-1}, J_n, J_{n+1}, J_{n+2}
     // 使用 GSL 的递推计算比多次调用更高效且稳健
@@ -116,6 +116,15 @@ generate_aak_waveform_cpp(
         
         // 确定 n 的求和范围
         // 经验公式: n_max ~ 5 / (1-e)
+        double gamma_phase = Phi_phi[i] - Phi_r[i];
+        
+        // 引入 viewing_phi (观测方位角) 修正 gamma
+        // 相当于旋转了 source frame
+        double effective_gamma = gamma_phase - viewing_phi; 
+        
+        double gam2 = 2.0 * effective_gamma;
+        double c2g = cos(gam2);
+        double s2g = sin(gam2);
         int n_max = static_cast<int>(10.0 / (1.0 - e_val + 1e-3));
         if (n_max < 10) n_max = 10;
         if (n_max > 50) n_max = 50; // 限制最大计算量
@@ -126,30 +135,58 @@ generate_aak_waveform_cpp(
             // 忽略太小的项 (性能优化)
             if (std::abs(pm.a) < 1e-9 && std::abs(pm.b) < 1e-9 && std::abs(pm.c) < 1e-9) continue;
 
-            // 1. 四极矩项 (m=2): 频率 2*Phi_phi + n*Phi_r
-            // 注意：BC04 中相位定义为 2*gamma - n*lambda. 
-            // 对应我们的 2*Phi_phi - n*Phi_r.
-            double phase_m2 = 2.0 * Phi_phi[i] - n * Phi_r[i];
-            double wave_phase_m2 = phase_m2 - 2.0 * viewing_phi;
+            // // 1. 四极矩项 (m=2): 频率 2*Phi_phi + n*Phi_r
+            // // 注意：BC04 中相位定义为 2*gamma - n*lambda. 
+            // // 对应我们的 2*Phi_phi - n*Phi_r.
+            // double phase_m2 = 2.0 * Phi_phi[i] - n * Phi_r[i];
+            // double wave_phase_m2 = phase_m2 - 2.0 * viewing_phi;
             
-            double c2 = cos(wave_phase_m2);
-            double s2 = sin(wave_phase_m2);
+            // double c2 = cos(wave_phase_m2);
+            // double s2 = sin(wave_phase_m2);
             
-            // 2. 低频记忆项 (m=0): 频率 n*Phi_r
-            // 注意：c_n 项的相位是 n*lambda (即 n*Phi_r)
-            double phase_m0 = n * Phi_r[i]; 
-            // m=0 项不受 viewing_phi 影响 (轴对称)
-            double c0 = cos(phase_m0);
+            // // 2. 低频记忆项 (m=0): 频率 n*Phi_r
+            // // 注意：c_n 项的相位是 n*lambda (即 n*Phi_r)
+            // double phase_m0 = n * Phi_r[i]; 
+            // // m=0 项不受 viewing_phi 影响 (轴对称)
+            // double c0 = cos(phase_m0);
             
-            // 累加 h+
-            // Term 1 (m=2): -(1+cos^2)*[a*cos - b*sin]
-            h_plus[i] -= h_amp * ap * (pm.a * c2 - pm.b * s2);
-            // Term 2 (m=0): +(1-cos^2)*c*cos
-            h_plus[i] += h_amp * sp * pm.c * c0;
+            // // 累加 h+
+            // // Term 1 (m=2): -(1+cos^2)*[a*cos - b*sin]
+            // h_plus[i] -= h_amp * ap * (pm.a * c2 - pm.b * s2);
+            // // Term 2 (m=0): +(1-cos^2)*c*cos
+            // h_plus[i] += h_amp * sp * pm.c * c0;
 
-            // 累加 hx
-            // Term 1 (m=2 only): +2cos*[b*cos + a*sin]
-            h_cross[i] += h_amp * ac * (pm.b * c2 + pm.a * s2);
+            // // 累加 hx
+            // // Term 1 (m=2 only): +2cos*[b*cos + a*sin]
+            // h_cross[i] += h_amp * ac * (pm.b * c2 + pm.a * s2);
+            // 径向相位 harmonics
+            double nPhi = n * Phi_r[i];
+            double cn = cos(nPhi);
+            double sn = sin(nPhi);
+
+            // 构建 AAK.cc 中的 Aplus 和 Acros (Line 333-334)
+            // Aplus = -(1+cos^2)*(a*cos2g - b*sin2g) + (1-cos^2)*c
+            // 注意：a 包含了 cos(nPhi), b 包含了 sin(nPhi), c 包含了 cos(nPhi)
+            // 我们需要在这里把 cos(nPhi) 乘进去
+            
+            // 展开 pm.a, pm.b, pm.c 对应的时变部分
+            // pm.a (from AAK.cc 'a') 应该乘以 cos(nPhi)
+            // pm.b (from AAK.cc 'b') 应该乘以 sin(nPhi)
+            // pm.c (from AAK.cc 'c') 应该乘以 cos(nPhi)
+            
+            double term_a = pm.a * cn;
+            double term_b = pm.b * sn;
+            double term_c = pm.c * cn;
+
+            // 组合 (Source Frame h+, hx)
+            // h+ = - (1+cos^2 i) * [ term_a * cos(2g) - term_b * sin(2g) ] + sin^2 i * term_c
+            double h_plus_n = -ap * (term_a * c2g - term_b * s2g) + sp * term_c;
+            
+            // hx = + 2 cos i * [ term_b * cos(2g) + term_a * sin(2g) ]
+            double h_cross_n = ac * (term_b * c2g + term_a * s2g);
+
+            h_plus[i]  += h_amp * h_plus_n;
+            h_cross[i] += h_amp * h_cross_n;
         }
     }
 
