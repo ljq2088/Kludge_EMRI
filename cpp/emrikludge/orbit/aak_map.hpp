@@ -77,7 +77,7 @@ public:
         // 简化模型：w_phi = w_theta + 2 * n * (a/M) * (M/p)^1.5
         
         // 为了保证 Map 有解，我们直接加上一个正定的 L-T 项
-        w_phi = w_th + n * 2.0 * SO * pow(epsilon, 1.5);
+        w_phi = w_th + n * lt_term;
         
         // *微调*：如果 Map 很难收敛，可能需要调整这里的公式使其更接近 Kerr 行为
         // 但作为 Kludge，只要它是 (p,e,i) 的光滑函数且大致正确即可
