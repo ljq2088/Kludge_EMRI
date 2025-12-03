@@ -10,11 +10,11 @@
 namespace emrikludge {
 
 struct MapTarget {
-    double Om_r_tgt_dim;   // 无量纲目标频率 (Omega * M_phys)
+    double Om_r_tgt_dim;
     double Om_th_tgt_dim;
     double Om_phi_tgt_dim;
     
-    double M_phys;         // 真实的物理质量
+    double M_phys; 
     double e_phys;
     double iota_phys;
 };
@@ -22,26 +22,19 @@ struct MapTarget {
 class AAKMap {
 public:
     // ---------------------------------------------------------
-    // 1. AK 无量纲频率公式
+    // 1. AK Frequency Formula
     // ---------------------------------------------------------
     static void get_ak_dim_frequencies(double M_map, double a_map, double p_map, 
                                        double e_phys, double iota_phys,
                                        double &w_r_dim, double &w_th_dim, double &w_phi_dim) {
-        if (p_map < 2.05) p_map = 2.05; 
+        if (p_map < 2.1) p_map = 2.1;
         
         double Y = 1.0 - e_phys * e_phys;
-        
-        // n_dim = (M_map * Y / p_map)^1.5 ? 
-        // 不，AK公式中 p_map 已经是几何单位。无量纲频率只取决于几何参数。
-        // w_dim_AK = (Y / p_map)^1.5
-        // M_map 的作用是在残差方程中调整物理时间尺度。
-        
         double n_dim = pow(Y / p_map, 1.5);
         double epsilon = 1.0 / p_map;
         double SO = a_map; 
         
         w_r_dim = n_dim;
-        
         double peri_adv = 3.0 * epsilon / Y;
         w_th_dim = w_r_dim * (1.0 + peri_adv);
 
@@ -50,37 +43,42 @@ public:
     }
 
     // ---------------------------------------------------------
-    // 2. GSL 残差函数 (归一化版)
+    // 2. GSL Residuals (Normalized)
     // ---------------------------------------------------------
     static int map_residuals(const gsl_vector *x, void *params, gsl_vector *f) {
         struct MapTarget *tgt = (struct MapTarget *) params;
 
-        // 提取变量 (全部为 O(1) 量级)
+        // --- SCALING VARIABLES ---
+        // x[0] = p_map (Order ~10)
+        // x[1] = M_ratio = M_map / M_phys (Order ~1.0) <--- Key Fix
+        // x[2] = a_map (Order ~0.1 - 1.0)
+
         double p_map = gsl_vector_get(x, 0);
-        double q_M   = gsl_vector_get(x, 1); // q_M = M_map / M_phys (Expect ~1.0)
-        double a_map = gsl_vector_get(x, 2); 
+        double M_ratio = gsl_vector_get(x, 1); 
+        double a_map = gsl_vector_get(x, 2);
 
-        // 恢复物理量
-        double M_map = q_M * tgt->M_phys;
+        // Recover physical M_map for calculation
+        double M_map = M_ratio * tgt->M_phys;
 
-        // 保护
+        // Safety constraints
         if (p_map < 2.05) p_map = 2.05;
-        if (M_map < 1.0) M_map = 1.0; 
+        if (M_map < 0.0) M_map = 1.0; 
 
-        double w_r_dim, w_th_dim, w_phi_dim;
+        double w_r_map, w_th_map, w_phi_map;
         get_ak_dim_frequencies(M_map, a_map, p_map, tgt->e_phys, tgt->iota_phys, 
-                               w_r_dim, w_th_dim, w_phi_dim);
+                               w_r_map, w_th_map, w_phi_map);
 
-        // 构造归一化残差
-        // 原方程: w_tgt_dim * M_map - w_map_dim * M_phys = 0
-        // 代入 M_map = q_M * M_phys:
-        // w_tgt_dim * q_M * M_phys - w_map_dim * M_phys = 0
-        // 两边消去 M_phys:
-        // w_tgt_dim * q_M - w_map_dim = 0
+        // Residual Equation: w_tgt_phys = w_map_phys
+        // Dimensionless: w_tgt_dim / M_phys = w_map_dim / M_map
+        // Cross multiply: w_tgt_dim * M_map - w_map_dim * M_phys = 0
+        // Substitute M_map = M_ratio * M_phys:
+        // w_tgt_dim * M_ratio * M_phys - w_map_dim * M_phys = 0
+        // Divide entire equation by M_phys (Normalize residuals to Order 1):
+        // Result: w_tgt_dim * M_ratio - w_map_dim = 0
         
-        double res_r   = tgt->Om_r_tgt_dim   * q_M - w_r_dim;
-        double res_th  = tgt->Om_th_tgt_dim  * q_M - w_th_dim;
-        double res_phi = tgt->Om_phi_tgt_dim * q_M - w_phi_dim;
+        double res_r   = tgt->Om_r_tgt_dim   * M_ratio - w_r_map;
+        double res_th  = tgt->Om_th_tgt_dim  * M_ratio - w_th_map;
+        double res_phi = tgt->Om_phi_tgt_dim * M_ratio - w_phi_map;
 
         gsl_vector_set(f, 0, res_r);
         gsl_vector_set(f, 1, res_th);
@@ -90,16 +88,17 @@ public:
     }
 
     // ---------------------------------------------------------
-    // 3. 映射求解器
+    // 3. Solver
     // ---------------------------------------------------------
     static void find_map_parameters(double M_phys, double a_phys, double p_phys,
                                     double e_phys, double iota_phys,
                                     double Om_r_kerr_dim, double Om_th_kerr_dim, double Om_phi_kerr_dim,
                                     double &M_map, double &a_map, double &p_map) {
         
-        // Warm Start 逻辑: 
-        // 如果传入的 guess 都是0 (第一次)，则初始化为物理参数
-        if (M_map == 0.0 || p_map == 0.0) {
+        // [FIX 1] Warm Start Logic
+        // Only reset to physical parameters if the input guesses are invalid (zero).
+        // This ensures trajectory continuity.
+        if (M_map <= 0.0 || p_map <= 0.0) {
             M_map = M_phys;
             a_map = a_phys;
             p_map = p_phys;
@@ -122,9 +121,11 @@ public:
         gsl_multiroot_function f = {&map_residuals, 3, &target};
 
         gsl_vector *x = gsl_vector_alloc(3);
-        // 设置初值 (注意转换 q_M)
+        
+        // [FIX 2] Scaling variables for the solver
+        // We pass M_ratio (~1.0) instead of M_map (~1e6)
         gsl_vector_set(x, 0, p_map);
-        gsl_vector_set(x, 1, M_map / M_phys); // 初值设为比值 (~1.0)
+        gsl_vector_set(x, 1, M_map / M_phys); 
         gsl_vector_set(x, 2, a_map);
 
         gsl_multiroot_fsolver_set(s, &f, x);
@@ -135,17 +136,18 @@ public:
             iter++;
             status = gsl_multiroot_fsolver_iterate(s);
             if (status) break;
-            // 因为残差已经归一化，1e-9 对应非常高的精度
-            status = gsl_multiroot_test_residual(s->f, 1e-10);
+            
+            // Tighten tolerance slightly to prevent low-level jitter
+            status = gsl_multiroot_test_residual(s->f, 1e-9); 
         } while (status == GSL_CONTINUE && iter < 30);
 
         if (status == GSL_SUCCESS) {
             p_map = gsl_vector_get(s->x, 0);
-            double q_M = gsl_vector_get(s->x, 1);
-            M_map = q_M * M_phys; // 还原为物理值输出
+            double M_ratio = gsl_vector_get(s->x, 1);
+            M_map = M_ratio * M_phys; // Restore physical mass
             a_map = gsl_vector_get(s->x, 2);
         } else {
-            // 失败回退
+            // If failed, reset to physical (or keep previous). Reset is safer to avoid drift.
             M_map = M_phys;
             a_map = a_phys;
             p_map = p_phys;
