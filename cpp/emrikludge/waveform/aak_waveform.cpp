@@ -178,6 +178,12 @@ generate_aak_waveform_cpp(
     double phiK = 0.0;
 
     double amp_scale = mu / dist; 
+    double max_e = 0.0;
+    for (double val : e) if (val > max_e) max_e = val;
+    
+    int n_max_global = std::max(20, static_cast<int>(30.0 * max_e));
+    if (n_max_global > 50) n_max_global = 50; // 硬上限防止太慢
+
 
     #pragma omp parallel for schedule(guided)
     for (size_t i = 0; i < N; ++i) {
