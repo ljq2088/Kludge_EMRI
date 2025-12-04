@@ -220,11 +220,11 @@ generate_aak_waveform_cpp(
         compute_rot_coeffs(iota_val, alp, qS, phiS, qK, phiK, rot);
 
         // 5. 谐波求和
-        int n_max = std::max(20, static_cast<int>(30.0 * e_val));
-        if (n_max < 4) n_max = 4;
-        if (n_max > 50) n_max = 50;
+        // int n_max = std::max(20, static_cast<int>(30.0 * e_val));
+        // if (n_max < 4) n_max = 4;
+        // if (n_max > 50) n_max = 50;
 
-        for (int n = 1; n <= n_max; ++n) {
+        for (int n = 1; n <= n_max_global; ++n) {
             // 这里传入正的 e_val，保证 GSL 不会报错
             PMCoeffs pm = compute_pm_coeffs_strict(n, e_val, h_amp);
             
